@@ -1,0 +1,40 @@
+{
+  "max_iterations": 10,
+  "stop_score": 8.5,
+  "consecutive_required": 2,
+  "consecutive_above_threshold": 0,
+  "consolidation_at_iteration": 3,
+  "current_iteration": 4,
+  "current_phase": "write",
+  "status": "running",
+  "last_score": 8.0,
+  "scores": [
+    {
+      "iteration": 1,
+      "score": 6.0
+    },
+    {
+      "iteration": 2,
+      "score": 7.0
+    },
+    {
+      "iteration": 3,
+      "score": 8.0
+    }
+  ],
+  "benchmark_dir": "human-bench/articles",
+  "benchmark_sample_size": 5,
+  "anti_patterns_log": "anti_patterns.md",
+  "current_benchmark_articles": [
+    "/tmp/zenn-article-gen/human-bench/articles/better-typescript-lib-v2.md",
+    "/tmp/zenn-article-gen/human-bench/articles/nitrogql-release-1_0-jp.md",
+    "/tmp/zenn-article-gen/human-bench/articles/kaonavi-datagrid-tanstack-table.md",
+    "/tmp/zenn-article-gen/human-bench/articles/typescript-4-8-type-narrowing.md",
+    "/tmp/zenn-article-gen/human-bench/articles/eslint-plugin-var-length.md"
+  ],
+  "topic": "KOLが増えるほど壊れていくオーケストレーターとどう戦ったか",
+  "source_material_files": [
+    "source-material/post-instructions-orchestrator-instructions.md",
+    "source-material/post-instructions-orchestrator-skill.md"
+  ]
+}
