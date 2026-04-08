@@ -1,13 +1,13 @@
 {
-  "max_iterations": 10,
-  "stop_score": 8.5,
-  "consecutive_required": 2,
-  "consecutive_above_threshold": 2,
+  "max_iterations": 20,
+  "stop_score": 9.0,
+  "consecutive_required": 3,
+  "consecutive_above_threshold": 3,
   "consolidation_at_iteration": 3,
-  "current_iteration": 5,
+  "current_iteration": 8,
   "current_phase": "review",
   "status": "complete",
-  "last_score": 8.5,
+  "last_score": 9.0,
   "scores": [
     {
       "iteration": 1,
@@ -28,17 +28,29 @@
     {
       "iteration": 5,
       "score": 8.5
+    },
+    {
+      "iteration": 6,
+      "score": 9.0
+    },
+    {
+      "iteration": 7,
+      "score": 9.0
+    },
+    {
+      "iteration": 8,
+      "score": 9.0
     }
   ],
   "benchmark_dir": "human-bench/articles",
   "benchmark_sample_size": 5,
   "anti_patterns_log": "anti_patterns.md",
   "current_benchmark_articles": [
-    "/tmp/zenn-article-gen/human-bench/articles/type-safe-routing-2021.md",
-    "/tmp/zenn-article-gen/human-bench/articles/typescript-export-empty.md",
+    "/tmp/zenn-article-gen/human-bench/articles/ts-4-6-destructing-unions.md",
+    "/tmp/zenn-article-gen/human-bench/articles/what-is-structuredclone.md",
+    "/tmp/zenn-article-gen/human-bench/articles/eslint-plugin-import-access.md",
     "/tmp/zenn-article-gen/human-bench/articles/timestamp-state-management.md",
-    "/tmp/zenn-article-gen/human-bench/articles/kaonavi-datagrid-tanstack-table.md",
-    "/tmp/zenn-article-gen/human-bench/articles/frontend-poem-2.md"
+    "/tmp/zenn-article-gen/human-bench/articles/type-safe-routing-2021.md"
   ],
   "topic": "KOLが増えるほど壊れていくオーケストレーターとどう戦ったか",
   "source_material_files": [
