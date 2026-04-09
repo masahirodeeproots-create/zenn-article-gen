@@ -77,7 +77,13 @@ def print_agent_context(config: dict, extra: dict = None):
 
 def cmd_simulate(config: dict):
     """Phase 0: 開発シミュレーションログの生成を開始"""
+    # フルリセット
     config["current_phase"] = "simulate"
+    config["current_iteration"] = 0
+    config["consecutive_above_threshold"] = 0
+    config["scores"] = []
+    config["last_score"] = None
+    config["status"] = "running"
     save_config(config)
 
     print("ACTION: CALL_DEV_SIMULATOR")
@@ -139,6 +145,9 @@ def cmd_start_iteration(config: dict):
         "style_guide_path": "style_guide.md",
         "anti_patterns_log_path": config["anti_patterns_log"],
         "dev_simulation_log_path": config["dev_simulation_log"],
+        "article_purpose": config.get("article_purpose", ""),
+        "reader_takeaway": config.get("reader_takeaway", ""),
+        "system_role": config.get("system_role", ""),
     })
 
 
@@ -163,6 +172,14 @@ def cmd_after_write(config: dict):
 
 def cmd_after_review(config: dict, score: float):
     n = config["current_iteration"]
+
+    # スコアジャンプ制限: 前回スコアから max_score_jump 以上の上昇を制限
+    max_jump = config.get("max_score_jump_per_iteration", 1.0)
+    prev_score = config.get("last_score")
+    if prev_score is not None and score > prev_score + max_jump:
+        capped = prev_score + max_jump
+        print(f"SCORE_CAPPED: {score} → {capped} (max jump {max_jump} from {prev_score})")
+        score = capped
 
     config["last_score"] = score
     config.setdefault("scores", []).append({"iteration": n, "score": score})
