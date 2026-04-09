@@ -16,6 +16,8 @@ LLMが担う責務（このスクリプトはやらない）:
 - スタイルガイド圧縮 (Consolidation)
 
 使い方:
+  python orchestrator.py simulate              # Phase 0: 開発シミュレーションログを生成
+  python orchestrator.py after-simulate        # Simulator完了後に実行
   python orchestrator.py start-iteration       # 新しい反復を開始（ベンチマークサンプリング含む）
   python orchestrator.py after-write           # Writer完了後に実行
   python orchestrator.py after-review <score>  # Reviewer完了後に実行 (例: after-review 8.5)
@@ -67,11 +69,41 @@ def print_agent_context(config: dict, extra: dict = None):
         "iteration": config["current_iteration"],
         "phase": config["current_phase"],
         "topic": config["topic"],
-        "source_material_files": config["source_material_files"],
     }
     if extra:
         ctx.update(extra)
     print(json.dumps(ctx, indent=2, ensure_ascii=False))
+
+
+def cmd_simulate(config: dict):
+    """Phase 0: 開発シミュレーションログの生成を開始"""
+    config["current_phase"] = "simulate"
+    save_config(config)
+
+    print("ACTION: CALL_DEV_SIMULATOR")
+    print_agent_context(config, {
+        "simulator_source_files": config["simulator_source_files"],
+        "dev_simulation_log_path": config["dev_simulation_log"],
+        "simulator_score_threshold": config.get("simulator_score_threshold", 95),
+    })
+
+
+def cmd_after_simulate(config: dict):
+    """Simulator完了後"""
+    log_path = BASE_DIR / config["dev_simulation_log"]
+    if not log_path.exists():
+        print("ERROR: dev_simulation_log.md not found. Simulator may have failed.")
+        sys.exit(1)
+
+    config["current_phase"] = "ready"
+    config["current_iteration"] = 0
+    config["consecutive_above_threshold"] = 0
+    config["scores"] = []
+    config["last_score"] = None
+    save_config(config)
+    print("STATUS: SIMULATION_COMPLETE")
+    print(f"LOG: {config['dev_simulation_log']}")
+    print("ACTION: Run 'python orchestrator.py start-iteration' to begin article generation")
 
 
 def cmd_status(config: dict):
@@ -106,6 +138,7 @@ def cmd_start_iteration(config: dict):
         "article_output_path": f"iterations/{n}/article.md",
         "style_guide_path": "style_guide.md",
         "anti_patterns_log_path": config["anti_patterns_log"],
+        "dev_simulation_log_path": config["dev_simulation_log"],
     })
 
 
@@ -206,6 +239,8 @@ def cmd_after_consolidate(config: dict):
 
 COMMANDS = {
     "status": cmd_status,
+    "simulate": cmd_simulate,
+    "after-simulate": cmd_after_simulate,
     "start-iteration": cmd_start_iteration,
     "after-write": cmd_after_write,
     # after-review は score 引数が必要なため main() で直接処理

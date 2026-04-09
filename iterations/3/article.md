@@ -1,250 +1,183 @@
 ---
 title: "KOLが増えるほど壊れていくオーケストレーターとどう戦ったか"
-emoji: "🎬"
+emoji: "🔧"
 type: "tech"
-topics: ["claudecode", "ai", "architecture"]
+topics: ["claudecode", "ai", "architecture", "agentteams"]
 published: true
 ---
 
-KOL（インフルエンサー）の数を増やすたびに、オーケストレーターが別の場所で壊れていきました。壊れるたびに直し、直すたびに新しい破綻が出てくる。しばらくそのサイクルを繰り返した後、ほとんどの問題が「あるエージェントが持つべきでない情報を持っていた」か「あるrunの成果物と別のrunの成果物が混在していた」という、同じ構造に収まっていることに気づきました。これはコンテキストの境界設計の話です。
+KOL向けの投稿指示書をPPTXで自動生成するパイプラインを運用しています。受注書とKOLリストを入力すると、リサーチからデッキ生成まで一気通貫で動くものです。3人のKOLでは快調でした。6人に増やした瞬間、5人目のキャプション方向性が1人目のコピーになりました。
 
-## KOL 5人案件で最初に何が起きたか
+パイプラインが壊れるのは、各Phaseが前のPhaseの成果物を「ファイルがあれば正しい」と信頼しているからです。この仮定は3人では成立して、6人では崩壊しました。
 
-作っていたのは、マーケティング案件でKOL向け投稿指示書（PPTX）を自動生成するオーケストレーター（`post-instructions-orchestrator`）です。入力は受注資料のPDFとKOLリスト、出力はKOL別・プラットフォーム別のスライドデッキで、各スライドにはクリエイティブ方向性、キャプション方向性、AIで生成したシーン画像、市場の法規制に基づいたcaution_pointsが入ります。
+## 6人で壊れたこと、そこからPhase 4を4つに割るまで
 
-処理はPhase 0から8まで8フェーズのパイプラインです。受注資料のパース（Phase 1）から始まり、製品リサーチ（Phase 1.5）、KOLリサーチ（Phase 2）、クリエイティブプランニング（Phase 3）、アセット生成（Phase 4）、スライドビルド（Phase 5）、ビジュアライズ（Phase 6）、レビュー（Phase 7）、エクスポート（Phase 8）まで一気通貫で処理します。フェーズ間には成果物ゲートがあり、必須ファイルが揃わないと次のフェーズに進めません。
-
-このオーケストレーターはOshigotoAI内のSkillとして実装されていて、intake・product-research・kol-research・exportは元々独立したSkillでしたが、現在はオーケストレーター内に参照ドキュメントとして統合されています（この判断については後半で触れます）。
-
-最初のバージョンではLeadエージェントがKOLリサーチをすべて担当し、Phase 3（クリエイティブプランニング）に直接流し込んでいました。KOL 2〜3人のうちは問題ありませんでした。
-
-KOL 5人案件で初めて試したとき、Phase 3のPlannerが生成した`per_kol_packages.json`を確認すると、4人目と5人目のKOLへの`caption_direction`が1人目・2人目のものと構造的に同一になっていました。`required_words`は"潤い"と"自然由来"を繰り返し、`required_points`も"成分の浸透感"と"朝のルーティン感"のコピーに近い状態です。5人のKOLはそれぞれフォロワー属性もトーンもまったく違うのに、後半の2人だけがデフォルト調のキャプション方向性になっていました。クライアントへの納品物を想像すると、5人全員に同じトーンで投稿させることになります。
-
-「モデルが後半のKOLを忘れた」という感覚に近いですが、正確には「限られたアテンションが5人分のリサーチ結果に薄く広がって、個々のKOLに尖ったプランニングをする余力がなくなった」という状態です。各KOLのリサーチはフォロワー属性、投稿トーン、カテゴリ別エンゲージメント、過去のブランドコラボ履歴を含みます。それが5人分積み重なるとLeadのコンテキストは「広くて浅い」状態になり、プランニングに入ってもKOLごとの差異を拾えなくなります。
-
-これが、システムを2モードに分岐させた直接のきっかけです。
-
-```json
-// checkpoint/run_state.json
-{
-  "execution_mode": "thin_large",
-  "kol_count": 5,
-  "phase": 2
-}
-```
-
-`classic_small`（KOL≤3）ではLeadが直接リサーチの一部を担当できます。`thin_large`（KOL≥4）ではLeadは成果物ゲートの管理だけに専念し、全処理をWorkerに委譲します。
-
-**thin_largeの本質は、Leadが何を「知らないか」を設計すること**です。LeadはKOLリサーチの中身を読みません。Workerがリサーチしてファイルとしてアウトプットしたものを、Leadは存在と数の確認だけします。5人分のKOLプロファイルがLeadのコンテキストに乗らなくなり、後半KOLのキャプション方向性の劣化は消えました。
-
-こう書くと単純に聞こえますが、実装してみると「どこまでLeadに渡すか」の線引きが難しかったです。Phase 3のPlannerはKOLの詳細情報を使ってクリエイティブ方向性を考えますが、thin_largeでPlannerはWorkerとしてspawnされるので、自分が担当するKOLの情報だけをコンテキストに持てばいいです。PlannerはLeadではないので、全KOLのリサーチをまとめて受け取る必要がありません。この「誰が何を持つか」の設計がthin_largeモードの核心で、LeadとPlannerを混同して設計すると再びコンテキスト爆発が起きます。
-
-thin_largeモードで重要なのは、LeadのKOL数に対する関与が「数値」だけであることです。LeadはKOLが何人いるかは知っています。それが必要です（Readiness Checkでファイル数と突き合わせるから）。しかしLeadはKOL_01が「スキンケア特化の25-34歳フォロワーが多いInstagramクリエイター」であることを知らなくていいです。それを知っているのはkol-01-researchというWorkerのコンテキストだけで十分です。
-
-## Readiness Checkという設計
-
-thin_largeモードにしたことで、次の問いが生まれました。WorkerたちのKOLリサーチが「全員分終わっているか」をLeadはどう判断するのか。
-
-最初は「全WorkerをspawnしてTask完了を待つ」でしたが、Workerがタイムアウトで無音失敗したとき気づけませんでした。5人中4人のリサーチが完了した状態でPhase 3に進んでも、エラーにならず処理が続いてしまいます。Phase 3のPlannerが存在しないKOLのリサーチファイルを参照しようとして初めて、4人分しかないことが判明します。それまで何も怒らないのが問題です。
-
-AgentTeamsでWorkerを並列spawnするとき、個々のWorkerの成否を上流のLeadが把握する仕組みは自動的には用意されていません。失敗を検出するには、Workerの出力物の存在をLeadが能動的にチェックする必要があります。Readiness Checkはその能動的チェックを形式化したもので、言い換えると「信頼するな、確認せよ」を指示書に書いたものです。
-
-そこでPhase 3への移行前にLeadがReadiness Checkを実行するようにしました。
-
-```
-Phase 2→3 Readiness Check:
-  ✓ intake_packet.json
-  ✓ kol_targets.json
-  ✓ product_deep_research/summary.json
-  ✓ kol_research_manifest.json
-  ✓ kol_research_summary.md
-  ✓ manifestに記載されたKOL数 == 実際のresearchファイル数
-```
-
-最後の「KOL数の一致チェック」が肝心です。`kol_research_manifest.json`には何名分リサーチされる予定かが記録されています。それと実際のリサーチファイル数が一致しているかを確認することで、「5人中4人しか揃っていないのにPhase 3に進む」バグを防ぎます。1件でも欠落があればPhase 3には進まず、欠落したartifactの再取得を試みます。Leadは中身を読みません。数と存在だけを確認します。
-
-このチェックリストをLeadのプロンプトに埋め込んでいるのですが、8フェーズのパイプラインで各フェーズにReadiness Checkを持つと、それだけでLeadのシステムプロンプトのかなりの割合を占有します。コンテキストを節約するためにWorkerに分散したはずのアーキテクチャが、別の形でLeadのコンテキストを膨らませているという皮肉な状態で、現状はまだ解決できていません。Readiness Checkを外部ファイルとして分離してLeadに参照させる設計も考えたのですが、参照するだけでもコンテキストに乗ることは変わらないので根本的な解決にはなりません。
-
-Readiness Checkで何を確認するかを決めるのにも設計判断が要りました。ファイルの「存在チェック」だけでは不十分で、「KOL数の一致チェック」が必要だったのは実際に5人中4人で進んでしまうバグを踏んだからです。存在チェックだけなら`kol_research_manifest.json`が存在すれば通過します。でもmanifestが存在するからといって、manifest内に記載された全KOLのリサーチファイルが揃っているとは限りません。この「ファイルが1つ存在する」と「必要な全ファイルが揃っている」の差が、Readiness Checkの肝でした。
-
-## Phase 4の4分割
-
-同じ問いが、今度はアセット生成フェーズで出てきました。
-
-Phase 4（アセット取得・解決）はもともと1回のsubagent spawnで実装していました。クライアントのロゴ取得、グローバルスタイルのAI画像生成、KOL別シーン画像生成、アセット統合をひとつのエージェントが担当する構成です。KOLが増えるとこのエージェントが「ロゴ取得・グローバルカバー生成・KOL別シーン画像生成を同時に考える」状態になり、指示の粒度が荒くなりました。
-
-具体的にどう荒くなったか。KOL 5人案件でこの1エージェント構成を試したとき、4cにあたるKOL別シーン画像がグローバルスタイル（4bで生成されるはずのcampaign_cover）を参照せずに生成されていました。5人のKOL全員のシーンが独自のスタイルで生成され、キャンペーン全体のビジュアルトンマナがバラバラになった状態です。1エージェントが「全部やる」コンテキストを持っていたために、4bの生成が終わる前に4cの処理が混在してしまいました。
-
-4つのsubagentに分割しています。
-
-```
-Phase 4a: asset-acquisition
-  → クライアントロゴ・商品参照画像を取得
-  → 出力: source_assets_manifest.json
-
-Phase 4b: global-style-generator
-  → campaign_cover(16:9) / title_cover(16:9) / product_main(9:16) をAI生成
-  → 出力: global_assets_manifest.json
-  → Gate: 3ファイルがすべて存在すること
-
-Phase 4c: kol-creative-worker × KOL数（並列実行）
-  → KOL 1名ずつ独立してspawn
-  → シーン画像4枚 + KOLリファレンス画像を生成
-  → 4bのGateをパスしていない場合は起動禁止
-
-Phase 4d: asset-resolver
-  → source + global + per-KOL を統合
-  → 出力: assets_resolved.json (status=ready)
-```
-
-4aと4bが直列なのは意図的です。4bでグローバルなビジュアルスタイル（ブランドカラー・トーン）を確定する前に4cのKOL別シーン画像を生成し始めると、スタイルが整合しない画像が出てきます。4bのゲート条件に「`campaign_cover.png`・`title_cover.png`・`product_main.png`の3ファイルが全て存在すること」を設けているのも同じ理由で、画像生成APIが2枚成功して1枚失敗したとき、4bを再実行して3枚揃えてから4cに進みます。「少なくとも1枚あれば」というゲート条件にしていたら、整合性のないアセットのまま後続フェーズが動いていました。
-
-ゲート条件を「全件揃うこと」にした結果、4bの画像生成が1枚でも失敗すると4b全体を再実行することになります。2枚は正常に生成できていても、もう1回生成し直しです。APIコストが倍になるケースもあります。これは現状の妥協で、「成功した分だけ保持して失敗した分だけ再生成」というより精緻な実装に変えることも考えましたが、状態管理が複雑になるので保留しています。
-
-4cが並列実行できるのは、各KOLのworkerがグローバルアセットを「読み取るだけ」で変更しないからです。依存関係を明確に切ることで並列性と安全性が両立しています。**並列化はコンテキストを分離した結果として得られる副産物**で、最初から並列化を目的にした設計ではありません。
-
-Phase 3のPlannerが生成する`per_kol_packages.json`に、4cに関するひとつ厄介なルールがあります。YouTubeロングのKOLには`scene_count: 6`（3列×2行）を指定しなければならず、他のプラットフォームは`scene_count: 4`です。この区別を忘れると、YTLong用スライドの3列目が空カラムになるバグが出ます。
-
-```json
-{
-  "kol_id": "kol_03",
-  "platform": "YTLong",
-  "scene_count": 6,
-  "render_medium": "semi_real_anime",
-  "caption_direction": {
-    "required_points": ["成分の浸透感", "朝のルーティン感"],
-    "required_words": ["潤い", "自然由来"],
-    "ng_expressions": ["〜な感じ", "おすすめ"],
-    "note": "ベース文テンプレート禁止 — KOLの口調を維持する"
-  }
-}
-```
-
-`caption_direction`に「ベース文テンプレート禁止」と書いてあるのは、テンプレートを渡すとKOLの固有の口調が潰れてしまうからです。「必ず含める内容と言葉」だけを渡して、文章の構成はKOLに任せます。指示の過不足がアウトプットの品質に直結します。
-
-`render_medium`は`hand_drawn_info`・`semi_real_anime`・`commercial_anime`の3択で、Plannerがそれぞれのリサーチ結果から判断します。この3択の設計理由は単純で、制約を設けないとモデルが「フォトリアル」や「イラスト調」といった曖昧な指定を生成し、4cのKOLシーン画像生成時に画像モデルへのプロンプトが発散するからです。Plannerのアウトプットを後続エージェントが機械的に処理できる形式に制約することで、4cのworkerはrender_mediumをそのまま画像生成プロンプトのスタイル指定に変換できます。「何を渡すか」の設計はアウトプット形式にも及びます。
-
-## stale artifactとの戦い
-
-4分割がうまく機能し始めると、別の問題が浮上しました。PPTXの生成は重いので途中から再実行することが多く、作業ディレクトリには前回の実行アセットが残っています。前回の`campaign_cover.png`が存在すると、4bのゲートが「パスした」と判断してしまいます。
-
-タイムスタンプで判断しようとも考えましたが、ビルドサーバーの時刻がずれていたりファイルがコピーされたりすると信頼できません。「ファイルが存在するかどうか」だけではそのファイルが「今回のrunで生成されたものか」はわからないからです。
-
-**解決策は、各Phase 4の出力JSONにrun_idを含めることです。**
+最初の構成は直列パイプラインです。
 
 ```python
-# 各Phase 4 subagentの出力JSONに必ずrun_idを含める
-def write_manifest(artifacts: list[dict], run_id: str, output_path: str):
-    manifest = {
-        "run_id": run_id,
-        "generated_at": datetime.utcnow().isoformat(),
-        "artifacts": artifacts,
-        "status": "ready"
-    }
-    with open(output_path, "w") as f:
-        json.dump(manifest, f, indent=2)
+for phase in [intake, kol_research, creative_plan, asset, build, review]:
+    result = run_subagent(phase, inputs=previous_outputs)
+```
 
-# ゲート判定時にrun_idを照合する
-def validate_gate(manifest_path: str, expected_run_id: str) -> bool:
-    with open(manifest_path) as f:
-        manifest = json.load(f)
-    if manifest.get("run_id") != expected_run_id:
-        # stale artifact — このPhaseを再実行する
+6人の案件で、5人目と6人目のキャプション方向性が「潤い」と「自然由来」の繰り返しになっていました。全KOL分のリサーチ結果が1つのSubagentのコンテキストに載っている状態でCreative Planningを実行すると、後半のKOLで前半の情報が支配的になります。
+
+最初に疑ったのはトークン数です。6人分のプロフィールと過去投稿分析が長すぎるのだろうと。要約ステップを挟んでみたんですが直りませんでした。要約しても前半偏重は変わらない。問題はトークン数ではなく**コンテキスト分離**の欠如でした。
+
+KOL数に応じて`classic_small`（3人以下、Leadが直接処理）と`thin_large`（4人以上、Leadはhandoffとgate判定のみ）を分けました。ただこれだけでは後半KOLの品質問題は完全には消えなくて、本当に効いたのはPhase 4の分割です。
+
+画像素材の生成を1つのSubagentに全部任せていたら、2つの壊れ方が同時に出ました。
+
+新しい案件なのに、3人目のKOLのシーン画像だけ前の案件のものが混ざっている。調べたら3人目の画像生成が途中で失敗してスキップされていて、前の実行の成果物がそのまま残っていました。キャッシュの問題だと思って1時間くらい無駄にしたのが本当に悔しかったです。単に「生成に失敗したファイルは存在しない → 古いファイルが残る」という話でした。
+
+もう1つ。1つのSubagentで全画像を生成しているので、途中で1人分がコケると後続のKOL全員の画像がないまま次のPhaseに進んでしまう。
+
+Phase 4を4つに分割しました。
+
+```
+Phase 4a: Asset Acquisition
+  → ロゴ・商品参照画像を取得
+  → planning/source_assets_manifest.json
+
+Phase 4b: Global Style Gen
+  → campaign_cover(16:9), title_cover(21:9), product_main(9:16)
+  → planning/global_assets_manifest.json
+  → Gate: 3画像の存在確認
+
+Phase 4c: KOL Creative × KOL数
+  → KOL 1名ずつ独立してsubagent spawn
+  → 4bのGateパス前は起動禁止
+
+Phase 4d: Asset Resolve
+  → 全アセットを統合
+  → planning/assets_resolved.json (status=ready)
+```
+
+4cがこの分割の核です。KOL 1名につき1つのSubagentを起動します。1人がコケても他に影響しません。
+
+4bが完了する前に4cを起動してはいけません。Global Style（カバー画像のトンマナ）が未定の状態でKOLのシーン画像を作ると、スタイルがバラバラになります。以前並列化を急いで4bと4cを同時に走らせたとき、KOLごとにまるで別案件みたいなビジュアルになりました。あれは笑ってしまいましたけど、納品できるものではなかったです。
+
+### stale artifactとrun_id、そしてstatusの罠
+
+前の実行の成果物が残る問題（stale artifact）には`run_id`で対処しました。
+
+```python
+from datetime import datetime, timezone
+
+run_id = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+# checkpoint/run_state.json に保存
+
+def check_gate(phase_result_path, current_run_id):
+    result = load_json(phase_result_path)
+    if result.get("run_id") != current_run_id:
+        return False  # stale
+    return True
+```
+
+UUIDではなく日時ベースにしたのは、デバッグ時に「いつの実行か」が一目でわかるからです。
+
+ここで終わりだと思うでしょう。終わりませんでした。
+
+`run_id`を入れた後でも、campaign_coverの生成に失敗した案件でBuildに進んでしまい、PPTXの表紙が真っ白になったことがあります。`assets_resolved.json`を開いたら`status: partial`と書いてある。`run_id`は一致している。Gate判定がファイルの存在と`run_id`の一致しか見ていなくて、`status`フィールドを見ていませんでした。
+
+なんでこうなるかというと、Gate判定を書くときに「チェックすべき項目」を最初から網羅的にリストアップできないからです。成果物のフォーマットが変わるたびにGateの検証項目も増える。自分のパイプラインで同じような「ファイルはあるけど中身がおかしい」問題を踏んだことがある人は多いんじゃないでしょうか。
+
+```python
+def check_build_gate(project_dir):
+    resolved = load_json(project_dir / "planning/assets_resolved.json")
+    
+    if resolved["status"] != "ready":
         return False
-    return all(
-        Path(a["path"]).exists()
-        for a in manifest["artifacts"]
-        if a.get("required")
-    )
+    if "campaign_cover" not in resolved.get("global_assets", {}):
+        return False
+    if resolved.get("run_id") != current_run_id:
+        return False
+    
+    return True
+# 不合格 → global-style-generatorから再実行 → asset-resolverを通し直す
 ```
 
-ゲート判定時にmanifestの`run_id`と`run_state.json`の`run_id`を照合し、不一致であればstale artifactと判断して該当フェーズを再実行します。
+`status`が`ready`であること、`campaign_cover`エントリの存在、`run_id`の一致。この3つを全部見てようやくBuildに進めます。チェックの粒度を上げるたびに「まだ見落としがある」と気づく繰り返しでした。
 
-実際にこのバグを踏んだのは、ある案件でPhase 4bが途中でタイムアウトして途中で止まった翌日に再実行したときです。前日の`campaign_cover.png`が作業ディレクトリに残っていて、ゲートチェックが「3ファイル全部存在する」と判断してPhase 4cが起動しました。その結果、前日とは別のrunでKOL別シーン画像が生成されて、グローバルスタイルと整合しないアセットがresolver（4d）に流れ込みました。`assets_resolved.json`はstatusがreadyになっていたのにFix Loop（Phase 5-7）でREJECTが続いて初めて何かおかしいと気づいた、という経緯です。
+## リサーチが欠けたままPhase 3に進んでいた
 
-このrun_idの仕組みを実装したとき、thin_largeモードでやっていたことと同じ構造だと気づきました。thin_largeでは「5人分のKOLプロファイルが1エージェントのコンテキストに混在する」問題をエージェント分割で解決しました。stale artifactは「今回のrunと前回のrunの成果物が同じファイルシステムに混在する」問題で、run_idはファイルシステム上の状態に「どのrunに属するか」というスコープをつける仕組みです。コンテキストの混在をエージェント分割で解くのと、成果物の混在をrun_idで解くのは、異なるレイヤーで同じ操作を行っています。
+Phase 4の話から戻ります。
 
-どちらも「境界のないところに境界を引く」という操作です。thin_largeは「このKOLの情報はこのWorkerのコンテキスト内にある」という境界で、run_idは「このファイルはこのrunに属する」という境界です。境界を引く前は混在があり、混在は誤動作を起こし、誤動作の原因を追うのが難しかったです。境界を引いたあとは、境界を越えたものがstaleと判定されて再実行されます。
+5人のKOLで回したとき、3人目だけクリエイティブプランが「フォロワーに響くコンテンツ」としか書いてない。researchディレクトリを見たらそのKOLのファイルがない。マニフェストには5人分あるのにresearchファイルは3人分。Phase完了判定が「マニフェストの存在」だけだったので素通りしていました。
 
-run_idで解決したあと、しばらくして気づいたことがあります。このrun_idの仕組みは「ファイルシステム上のrunの分離」には効きますが、「実行中の別runとの混在」には効きません。並列で2つのrunが走っていて、どちらも同じ作業ディレクトリを使っていたら、run_idが異なっていても4bのゲートが混乱します。現在の実装では同一ディレクトリで2runを並列実行する想定がないのでこれは実害がありませんが、もしそうする場合はディレクトリ自体をrun_idでnamespaceする必要があります。これはまだ実装していません。
-
-## まだ解決していないドリフト問題
-
-run_idで成果物のスコープを管理できたのですが、状態のドリフト問題が残っています。
-
-`run_state.json`と`plan.json`にはどちらにも`execution_mode`フィールドがあります。この2つは常に一致しなければならないinvariantです。どこかのフェーズで`run_state.execution_mode`を更新し忘れると、Leadが`thin_large`モードで動いているのにplanが`classic_small`を前提にするという状態が生まれます。症状が現れるのは数フェーズ後で、Workerを過剰にspawnしたりLeadが直接処理を抱えてコンテキストが溢れたりします。どこで不一致が起きたかを遡るのも難しいです。
+Phase 2→3にReadiness Checkを入れました。
 
 ```python
-# 未実装 — 設計案
-def assert_state_plan_invariant(run_state: dict, plan: dict):
-    if run_state["execution_mode"] != plan["execution_mode"]:
-        raise InvariantViolation(
-            f"State/Plan drift detected: "
-            f"run_state={run_state['execution_mode']}, "
-            f"plan={plan['execution_mode']}"
-        )
+def check_phase3_readiness(project_dir):
+    required = {
+        "intake_packet":      "planning/intake_packet.json",
+        "kol_targets":        "planning/kol_targets.json",
+        "product_research":   "research/product_deep_research/summary.json",
+        "kol_manifest":       "research/kol_research_manifest.json",
+        "kol_summary":        "planning/kol_research_summary.md",
+    }
+    for name, path in required.items():
+        if not (project_dir / path).exists():
+            return False, f"{name} missing"
+
+    manifest = load_json(project_dir / "research/kol_research_manifest.json")
+    expected = len(manifest["kols"])
+    actual = len(list((project_dir / "research/kol_research").glob("*.json")))
+    if actual != expected:
+        return False, f"KOL research: {actual}/{expected}"
+    return True, "ok"
 ```
 
-なぜ実装できていないかというと、このチェックをどのタイミングで呼ぶのが正しいかが決まっていないからです。各フェーズの入口で毎回チェックするのが安全ですが、そうするとLeadのプロンプトにinvariantチェックのロジックを何度も書く必要があります。Pythonなら`@phase_entry`デコレータを1行書けば済むのですが、自然言語の指示書ではそのような「フェーズ前処理」の抽象化が難しいです。コードなら横断的関心事を1箇所に書けますが、プロンプトは今のところそういう書き方ができません。
+1件でも欠落があればPhase 3に進まない。`product_research`の項目は後から追加したもので、最初のパイプラインにはProduct Research自体がありませんでした。商品の特徴を知らないまま指示書を作ると、全KOLに「おすすめです」しか書けなくなります。
 
-ひとつの方向性は、invariantチェック専用のValidatorエージェントを立てることです。各フェーズに進む前にLeadがValidatorをspawnし、Validatorが`run_state.json`と`plan.json`の整合性を確認してOK/NGを返す。LeadはValidatorの結果だけを受け取ればよく、invariantチェックのロジックをLeadのプロンプトに書かずに済みます。ただしエージェントが1つ増えるオーバーヘッドがあり、コンテキストを節約するためにエージェントを分割したはずがコスト構造を複雑にするという、Readiness Checkのときと同じジレンマに戻ってきます。
+## Build/Visualize/ReviewをAgentTeamsで閉じる
 
-`execution_mode`のドリフトが実際に問題になったことはまだありません。今のところ同一セッション内で`execution_mode`を書き換えるシナリオがほとんどないからです。ただし「ないことを確認した」というより「まだ踏んでいない」という状況で、実際に踏むのはKOL数が途中で変わる案件（「やっぱり6人にして」という変更）が来たときだろうと予測しています。そのとき初めてinvariantチェックの実装を迫られると思います。今はソースコードのコメントにTODOを残してあります。
+ここまではPhase間の遷移ゲートの話でした。もう1つ、Buildの後のレビュー結果が反映されない問題がありました。
 
-:::details Plannerの知識の鮮度問題
+Reviewerが「キャプションのトーンがブリーフと合っていない」と指摘してくれるのに、Build → Visualize → Review → Exportが直列で、REJECTしても巻き戻れない。AgentTeamsでPhase 5-6-7を1チーム内の閉ループにしました。
 
-Phase 3のPlannerが生成する`per_kol_packages.json`には`caution_points`（市場別の法規制注意事項）が含まれます。JPなら景品表示法・薬機法、USならFTCのendorsement guidelines（`#ad`/`#sponsored`表示必須）、TH/VN/IDは各国広告規制に準拠します。
+```python
+# AgentTeams fix loop（擬似コード）
+team = AgentTeam(builder, visualizer, reviewer)
 
-この知識はPlannerのコンテキストに直接埋め込まれています。規制が変わるたびに参照ドキュメントを手動で更新する必要があり、更新を忘れたときの検出機構がありません。古いcaution_pointsのまま案件が進んでKOLに投稿させると、景品表示法違反のリスクがあります。
+for iteration in range(MAX_FIX_ITERATIONS):  # max 10
+    if iteration == 0:
+        team.run(builder)
+    
+    team.run(visualizer)
+    verdict = team.run(reviewer)
+    
+    if verdict.status == "APPROVE":
+        break
+    elif verdict.fix_target == "data":
+        team.run(builder)  # data_binding.jsonに問題 → builderから
+    elif verdict.fix_target == "pptx":
+        pass  # PPTX上の問題 → visualizerから再実行
+else:
+    escalate_to_human()
+```
 
-「動的に更新される外部知識をエージェントのコンテキストにどう安全に反映するか」という問いで、run_idで解いたファイルシステムの問題のコンテキスト版です。run_idは「どのrunか」というスコープを付与しましたが、知識の鮮度を表すスコープは今のところ存在しません。今のところ解決できていません。
+通常2-3回で収束します。10回は安全弁です。
 
+この閉ループで見えてきたのがcaption-bindingの問題です。KOL Aのスライドに KOL Bの開示タグが入っていたり、市場による開示トークンの違い（JP: `#PR`、US: `#ad`、TH: `#โฆษณา`）が無視されて全部「#ad」になっていたり。builderのプロンプトにShapeマッピングのルールが含まれていなかったのが原因で、`caption-binding-rules.md`を**single source of truth**として定義し、builder spawn時に必ず全文を含める契約にしました。
+
+:::details Visualizerのフォント色問題
+PPTXのテキストが背景と同化して白くなるスライドがありました。Visualizerがフォント色を明示設定していなかったため、テーマカラーの継承で白になっていた。全テキストrunに`030303`をsolidFillで設定、`_bg`/`_fill`/`_header`/`_label`等のデザインShapeは例外。`visible:false`のShapeはテキストを空にしてオフキャンバスへ。endParaRPr順序修正と`update_slide_numbers()`も同タイミングで追加。地味な修正ですがこれがないとデッキが見た目として成立しません。
 :::
 
-## Phase 5-6-7のFix Loop
-
-Build（Phase 5）→ Visualize（Phase 6）→ Review（Phase 7）はAgentTeamsのFix Loopで実装しています。ReviewerがREJECTを返したとき、`target: data`であればbuilderから、`target: pptx`であればvisualizerから再実行します。最大10回のイテレーションです。
+最終的なPhase構成です。
 
 ```
-Fix Loop:
-  REJECT + target: data  → builder再spawn → visualizer → reviewer
-  REJECT + target: pptx  → visualizer再spawn → reviewer
-  APPROVE                → Phase 8へ
-  最大iteration: 10
+Phase 0:   Initialize
+Phase 1:   Intake
+Phase 1.5: Product Research
+Phase 2:   KOL Research
+             → Readiness Check（6項目 + KOLファイル数一致）
+Phase 3:   Creative Planning
+Phase 4a-d: Asset（4分割、run_id + status + campaign_cover）
+Phase 5-7: Build / Visualize / Review（AgentTeams、max 10）
+Phase 8:   Export
 ```
 
-初期の実装でFix Loopが収束しないケースが多かったのですが、原因はReviewerの`target`フィールドの精度でした。Reviewerが「スライドの数値が間違っている（→ data）」と「テキストの位置がずれている（→ pptx）」を正確に区別できないと、builderを再実行しても問題がvisualizerにあったというすれ違いが起きます。ReviewerのシステムプロンプトにREJECT判断基準（「スライドの数値が正しくない → data」「テキストの配置がずれている → pptx」）を詳細に書いて初めてループが収束するようになりました。Reviewerが正確な診断をできるかどうかもコンテキストの品質で決まります。
+Orchestratorの責務はmode選択・Phase順序・artifact gateの3つだけにして、各Phaseの手順はsubordinate skillsのspawn packetに分離しています。
 
-もう一点、Visualizerで見落としていたのがフォント色の明示指定です。テーマ継承色（inherited）を使うとPowerPointとKeynoteで異なる表示になります。Visualizerのシステムプロンプトに「テキスト書き込み時は必ず明示的なフォント色（030303）を設定すること、テーマ継承色は使用禁止」というルールを追加したところ、REJECT率が大幅に下がりました。PPTXの互換性問題はビューワーの解釈に依存するため、実際に複数のビューワーで確認するまで気づけませんでした。
-
-このFix Loopで興味深いのは、Reviewerが「品質の判定基準」と「どのエージェントを再起動するかの診断」の両方を担っている点です。Reviewerはスライドを見て「これはdata側の問題か、rendering側の問題か」を判断しなければなりません。これは人間の品質レビューでも難しい判断で、「見た目はおかしいがデータは正しい」というケースはVisualizerの問題、「データ自体が間違っている」はBuilderの問題です。Reviewerにこの2つを正確に区別させるには、それだけのコンテキストを与える必要があります。Reviewerのシステムプロンプトを詳細に書いたことで、初めてFix Loopが正しい方向に再実行されるようになりました。
-
-現状のFix Loopには、同じREJECT理由が3回以上続いた場合のエスカレーション機能がありません。10回の上限で止まるだけなので、ループが詰まると上限まで無駄なroundtripを繰り返します。「同じtargetで3連続REJECTなら人間にエスカレーション」という処理を入れる設計は考えているのですが、「人間に返す」インターフェースをどう実装するかがまだ決まっていません。
-
-Fix Loopの上限10回というのもやや経験則で、これ以上回しても収束しない場合はデータかテンプレートに根本的な問題があることが多いです。実際のところ、正常系では3-4回でAPPROVEになることがほとんどです。10回というのは「絶対に詰まらないようにした数」で、もし5回を超えたらそのREJECTログを見てシステムプロンプトを直す、というオペレーションになっています。
-
-## 統合したSkillと分離したSkill
-
-このシステムを作る前、intake・product-research・kol-research・exportはそれぞれ独立したtier2 Skillとして実装していました。それをオーケストレーター内の参照ドキュメント（`reference/*.md`）として統合しました。
-
-独立Skillとして残しておくとSkillルーターによる検索・ロードのコストがかかります。一方、参照ドキュメントとして統合するとオーケストレーター起動時のコンテキストが増えます。どちらが得かは「毎回呼ばれるかどうか」で決まります。intake・product-research・kol-researchはほぼ毎回呼ばれるので統合を選びました。exportは案件によってはSkip可能なので独立のままにしています。
-
-もう少し正確に言うと、判断基準は「毎回呼ばれるか」だけではなく、「SkillルーターのロードコストとReadtimeコストのどちらが大きいか」です。Skillルーターはembedding検索で候補を絞ってからロードしますが、ロードするたびにSkillのドキュメントをコンテキストに積みます。毎回積むなら最初から統合したほうが1回で済みます。逆に条件付きでしか使わないものを統合すると、使わないときのコンテキストを常に消費します。
-
-この判断を先にしなかったことで、Phase 1.5のProduct Researchが「独立Skillで実装→ほぼ毎回呼ばれると判明→統合」という2ステップになりました。最初から分析して判断していれば1ステップで済んだはずです。
-
-「必ず呼ばれるか」を先に分析してから統合・分離を決める、というのが教訓です。ただ案件の種類が増えてくると「必ず呼ばれる」という前提が崩れることがあるので、統合は後戻りしにくい判断です。Phase 1.5のProduct Researchは最初独立Skillでしたが、ほぼ毎回呼ばれることがわかったので統合しました。このような後から統合するケースは予測が難しく、設計当初に完璧に判断するのは無理だと思っています。
-
-逆にexportは「案件によってはSkip可能」という性質が最初からわかっていたので、独立のままにすることを迷わずに決められました。「使われないときのコストを払いたくない」という判断基準が明確なときは迷いません。
-
-:::details Skillを統合すると元に戻せない
-
-独立SkillをオーケストレーターのリファレンスDocとして統合すると、他の場所から再利用しにくくなります。intakeのロジックを別のオーケストレーターでも使いたくなったとき、参照ドキュメントとして埋め込まれていると取り出すのが面倒です。統合はコンテキスト効率を上げますが、モジュール性を犠牲にします。今のところintakeは別の場所から使われていないので問題になっていませんが、将来のリファクタリングコストを今から気にしています。
-
-:::
-
----
-
-`execution_mode`のドリフト問題がまだ残っているということは、まだ境界を引き切れていない場所があるということでもあります。KOL数が途中で変わる案件（追加・削除）は今のところ「新規runとして再実行」という運用で回避していますが、これは設計ではなくオペレーションによる回避です。設計で解決していないことをオペレーションで隠しているとき、いつかそのオペレーションが破綻します。
-
-LLMに仕事をさせるシステムを作るということは、コンテキストという資源をどう設計するかという問いと、ずっと向き合い続けることなのかもしれません。
+ここまでの設計判断は全部「壊れてから直す」で得たものです。Phase 4cでKOLが15人になったらSubagentのspawn上限に引っかかるのか、どこかで並列度を絞る必要があるのかは検証していません。Phase 4b→4cの依存関係が正しく機能しているかのテストも、実案件でしか確認できていないので、エッジケースでどうなるかはわかりません。

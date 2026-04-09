@@ -1,59 +1,37 @@
 {
   "max_iterations": 20,
   "stop_score": 9.0,
-  "consecutive_required": 3,
-  "consecutive_above_threshold": 3,
+  "consecutive_required": 2,
+  "consecutive_above_threshold": 0,
   "consolidation_at_iteration": 3,
-  "current_iteration": 8,
+  "current_iteration": 3,
   "current_phase": "review",
-  "status": "complete",
-  "last_score": 9.0,
+  "status": "running",
+  "last_score": 7.5,
   "scores": [
     {
       "iteration": 1,
-      "score": 6.0
+      "score": 6.5
     },
     {
       "iteration": 2,
-      "score": 7.0
-    },
-    {
-      "iteration": 3,
-      "score": 8.0
-    },
-    {
-      "iteration": 4,
-      "score": 8.5
-    },
-    {
-      "iteration": 5,
-      "score": 8.5
-    },
-    {
-      "iteration": 6,
-      "score": 9.0
-    },
-    {
-      "iteration": 7,
-      "score": 9.0
-    },
-    {
-      "iteration": 8,
-      "score": 9.0
+      "score": 7.5
     }
   ],
   "benchmark_dir": "human-bench/articles",
   "benchmark_sample_size": 5,
   "anti_patterns_log": "anti_patterns.md",
+  "dev_simulation_log": "dev_simulation_log.md",
+  "simulator_score_threshold": 95,
   "current_benchmark_articles": [
-    "/tmp/zenn-article-gen/human-bench/articles/ts-4-6-destructing-unions.md",
-    "/tmp/zenn-article-gen/human-bench/articles/what-is-structuredclone.md",
     "/tmp/zenn-article-gen/human-bench/articles/eslint-plugin-import-access.md",
-    "/tmp/zenn-article-gen/human-bench/articles/timestamp-state-management.md",
-    "/tmp/zenn-article-gen/human-bench/articles/type-safe-routing-2021.md"
+    "/tmp/zenn-article-gen/human-bench/articles/return-await-promise.md",
+    "/tmp/zenn-article-gen/human-bench/articles/8870bbf7c14c22.md",
+    "/tmp/zenn-article-gen/human-bench/articles/typescript-module-option.md",
+    "/tmp/zenn-article-gen/human-bench/articles/96156cecc6596a.md"
   ],
   "topic": "KOLが増えるほど壊れていくオーケストレーターとどう戦ったか",
-  "source_material_files": [
+  "simulator_source_files": [
     "source-material/post-instructions-orchestrator-instructions.md",
     "source-material/post-instructions-orchestrator-skill.md"
   ]
