@@ -1,36 +1,21 @@
 {
-  "max_iterations": 20,
+  "max_iterations": 10,
   "stop_score": 9.0,
   "consecutive_required": 2,
   "consecutive_above_threshold": 0,
   "consolidation_at_iteration": 3,
-  "current_iteration": 3,
-  "current_phase": "review",
+  "current_iteration": 0,
+  "current_phase": "idle",
   "status": "running",
-  "last_score": 7.5,
-  "scores": [
-    {
-      "iteration": 1,
-      "score": 6.5
-    },
-    {
-      "iteration": 2,
-      "score": 7.5
-    }
-  ],
+  "last_score": null,
+  "scores": [],
   "benchmark_dir": "human-bench/articles",
   "benchmark_sample_size": 5,
   "anti_patterns_log": "anti_patterns.md",
   "dev_simulation_log": "dev_simulation_log.md",
   "simulator_score_threshold": 95,
-  "current_benchmark_articles": [
-    "/tmp/zenn-article-gen/human-bench/articles/eslint-plugin-import-access.md",
-    "/tmp/zenn-article-gen/human-bench/articles/return-await-promise.md",
-    "/tmp/zenn-article-gen/human-bench/articles/8870bbf7c14c22.md",
-    "/tmp/zenn-article-gen/human-bench/articles/typescript-module-option.md",
-    "/tmp/zenn-article-gen/human-bench/articles/96156cecc6596a.md"
-  ],
-  "topic": "KOLが増えるほど壊れていくオーケストレーターとどう戦ったか",
+  "current_benchmark_articles": [],
+  "topic": "AIエージェント8体で1枚のPPTXを作る — 「誰が何を知るべきか」の設計",
   "simulator_source_files": [
     "source-material/post-instructions-orchestrator-instructions.md",
     "source-material/post-instructions-orchestrator-skill.md"
