@@ -194,35 +194,23 @@ def cmd_after_write(config: dict):
 def cmd_after_review(config: dict, score: float):
     n = config["current_iteration"]
 
-    # スコアジャンプ制限: 前回スコアから max_score_jump 以上の上昇を制限
-    max_jump = config.get("max_score_jump_per_iteration", 1.0)
-    prev_score = config.get("last_score")
-    if prev_score is not None and score > prev_score + max_jump:
-        capped = prev_score + max_jump
-        print(f"SCORE_CAPPED: {score} → {capped} (max jump {max_jump} from {prev_score})")
-        score = capped
-
     config["last_score"] = score
     config.setdefault("scores", []).append({"iteration": n, "score": score})
-
-    # 連続達成カウンターを更新
-    consecutive_required = config.get("consecutive_required", 2)
-    if score >= config["stop_score"]:
-        config["consecutive_above_threshold"] = config.get("consecutive_above_threshold", 0) + 1
-    else:
-        config["consecutive_above_threshold"] = 0
-
     save_config(config)
 
     print(f"SCORE: {score}/10")
-    print(f"THRESHOLD: {config['stop_score']}/10")
-    print(f"CONSECUTIVE: {config['consecutive_above_threshold']}/{consecutive_required}")
 
-    if config["consecutive_above_threshold"] >= consecutive_required:
-        print(f"ACTION: STOP  # {consecutive_required} consecutive scores >= {config['stop_score']}")
-        config["status"] = "complete"
-        save_config(config)
-        return
+    # 停滞検出: 直近3回のスコアが±0.5以内なら停止
+    scores = [s["score"] for s in config["scores"]]
+    stagnation_window = config.get("stagnation_window", 3)
+    stagnation_tolerance = config.get("stagnation_tolerance", 0.5)
+    if len(scores) >= stagnation_window:
+        recent = scores[-stagnation_window:]
+        if max(recent) - min(recent) <= stagnation_tolerance:
+            print(f"ACTION: STOP  # stagnation detected: last {stagnation_window} scores = {recent}")
+            config["status"] = "complete"
+            save_config(config)
+            return
 
     if n >= config["max_iterations"]:
         print(f"ACTION: STOP  # max iterations ({config['max_iterations']}) reached")

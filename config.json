@@ -1,10 +1,8 @@
 {
   "max_iterations": 10,
-  "stop_score": 9.0,
-  "consecutive_required": 2,
-  "consecutive_above_threshold": 0,
   "consolidation_at_iteration": 5,
-  "max_score_jump_per_iteration": 1.0,
+  "stagnation_window": 3,
+  "stagnation_tolerance": 0.5,
   "current_iteration": 0,
   "current_phase": "idle",
   "status": "running",
