@@ -1,30 +1,32 @@
 # Zenn Article Generator - Orchestrator Guide
 
-OshigotoAIシステムについてのZenn記事を反復的に生成・改善するワークフロー。
+AIエージェントシステムについてのZenn記事を反復的に生成・改善するワークフロー。
 
 ## アーキテクチャ
 
-### Sub-Agents
-1. **Writer Agent** (`.claude/agents/writer.md`): 記事生成。style_guide.md + source-material/ のみ参照
-2. **Reviewer Agent** (`.claude/agents/reviewer.md`): 記事レビュー。human-bench/articles/ と比較
-3. **Style Guide Updater** (`.claude/agents/style_guide_updater.md`): スタイルガイド改善
+### Phase 0: 準備
+1. `python orchestrator.py init <source_files>` — Config自動生成
+2. `python orchestrator.py simulate` — Dev Simulation（3独立AI）
 
-### 情報フロー
+### Phase 1〜: 記事生成ループ
+1. **Writer Agent** — dev_simulation_log.md + style_guide.md + anti_patterns.md を参照
+2. **Reviewer Agent** — 読者体験型評価。ベンチマーク記事と比較
+3. **Style Guide Updater** — ベンチマーク差分を具体例でガイドに追加
+
+### 停止条件
+- 2連続 ≥ 9.0/10
+- 最大10イテレーション
+- スコアジャンプ制限: +1.0/iter
+
+## コマンド一覧
 ```
-source-material/ → Writer → article.md
-                      ↑
-style_guide.md ←── Style Guide Updater ←── Reviewer ←── human-bench/articles/
+python orchestrator.py init <file1> <file2>   # Config自動生成
+python orchestrator.py simulate               # Dev Simulation
+python orchestrator.py after-simulate          # Simulation完了後
+python orchestrator.py start-iteration         # 記事生成ループ開始
+python orchestrator.py after-write             # Writer完了後
+python orchestrator.py after-review <score>    # Reviewer完了後
+python orchestrator.py after-update            # Updater完了後
+python orchestrator.py after-consolidate       # Consolidation完了後
+python orchestrator.py status                  # 状態確認
 ```
-
-## ワークフロー
-
-1. トピック決定
-2. `iterations/{N}/` 作成、style_guide.md をコピー
-3. Writer Agent 実行 → `iterations/{N}/article.md`
-4. Reviewer Agent 実行 → `iterations/{N}/review.md`
-5. Style Guide Updater 実行 → style_guide.md 更新 + `iterations/{N}/changelog.md`
-6. スコア確認 → 8.5以上なら完了、未満なら次のiterationへ
-
-## 記事トピック
-
-「Claude Codeで103個のSkillを持つAIエージェント基盤を作った話 — LLM as a Workflowという設計思想」

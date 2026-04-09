@@ -16,6 +16,7 @@ LLMが担う責務（このスクリプトはやらない）:
 - スタイルガイド圧縮 (Consolidation)
 
 使い方:
+  python orchestrator.py init <file1> <file2>  # ソースからconfig自動生成
   python orchestrator.py simulate              # Phase 0: 開発シミュレーションログを生成
   python orchestrator.py after-simulate        # Simulator完了後に実行
   python orchestrator.py start-iteration       # 新しい反復を開始（ベンチマークサンプリング含む）
@@ -73,6 +74,26 @@ def print_agent_context(config: dict, extra: dict = None):
     if extra:
         ctx.update(extra)
     print(json.dumps(ctx, indent=2, ensure_ascii=False))
+
+
+def cmd_init(config: dict, source_files: list[str]):
+    """ソースファイルからconfig.jsonの記事関連フィールドを自動生成"""
+    # ソースファイルの存在チェック
+    for f in source_files:
+        path = BASE_DIR / f if not Path(f).is_absolute() else Path(f)
+        if not path.exists():
+            print(f"ERROR: Source file not found: {f}")
+            sys.exit(1)
+
+    config["simulator_source_files"] = source_files
+    config["current_phase"] = "init"
+    save_config(config)
+
+    print("ACTION: CALL_CONFIG_GENERATOR")
+    print(json.dumps({
+        "source_files": source_files,
+        "instruction": "ソースファイルを読んで topic, article_purpose, reader_takeaway, system_role を生成し、config.json に書き込んでください",
+    }, indent=2, ensure_ascii=False))
 
 
 def cmd_simulate(config: dict):
@@ -265,7 +286,7 @@ COMMANDS = {
     "after-consolidate": cmd_after_consolidate,
 }
 
-ALL_COMMANDS = list(COMMANDS.keys()) + ["after-review"]
+ALL_COMMANDS = list(COMMANDS.keys()) + ["after-review", "init"]
 
 
 def main():
@@ -277,7 +298,13 @@ def main():
 
     config = load_config()
 
-    if cmd == "after-review":
+    if cmd == "init":
+        if len(sys.argv) < 3:
+            print("ERROR: init requires source file paths")
+            print("  Usage: python orchestrator.py init <file1> <file2> ...")
+            sys.exit(1)
+        cmd_init(config, sys.argv[2:])
+    elif cmd == "after-review":
         if len(sys.argv) < 3:
             print("ERROR: after-review requires a score argument")
             print("  Usage: python orchestrator.py after-review <score>")

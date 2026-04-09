@@ -1,11 +1,9 @@
 # Style Guide Changelog — Iteration 4
 
-**Score:** 9.0/10 (up from 8.5) — First consecutive >=9.0
-**Main improvements:** 結論テーゼ繰り返し削除、Readiness Check報告調緩和
-**Status:** 1/2 consecutive >=9.0
+**Score:** 9.0/10 — First consecutive >= 9.0
+**Main issues:** 脱線シグナル、クロージングが駆け足
 
-## Style Guide Changes
-- なし（review指摘が軽微のため）
+## Changes to anti_patterns.md
 
-## Anti-Patterns Log Changes
-- なし（新パターン未発見）
+1パターンを追記:
+1. 脱線シグナルの付与（シグナルなしに統合すべき）
