@@ -89,10 +89,11 @@ def cmd_init(config: dict, source_files: list[str]):
     config["current_phase"] = "init"
     save_config(config)
 
-    print("ACTION: CALL_CONFIG_GENERATOR")
+    print("ACTION: CALL_CONFIG_GENERATOR_AND_CONTEXT_BRIEF")
     print(json.dumps({
         "source_files": source_files,
-        "instruction": "ソースファイルを読んで topic, article_purpose, reader_takeaway, system_role を生成し、config.json に書き込んでください",
+        "instruction": "1) ソースファイルを読んで topic, article_purpose, reader_takeaway, system_role を生成し config.json に書き込む  2) context_brief.md を生成する",
+        "context_brief_path": config.get("context_brief", "context_brief.md"),
     }, indent=2, ensure_ascii=False))
 
 
@@ -128,9 +129,72 @@ def cmd_after_simulate(config: dict):
     config["scores"] = []
     config["last_score"] = None
     save_config(config)
+    # 素材ループ用フィールドをリセット
+    config["material_scores"] = []
+    config["material_current_iteration"] = 0
+    save_config(config)
+
     print("STATUS: SIMULATION_COMPLETE")
     print(f"LOG: {config['dev_simulation_log']}")
-    print("ACTION: Run 'python orchestrator.py start-iteration' to begin article generation")
+    print("ACTION: Run 'python orchestrator.py review-materials' to review and improve materials")
+
+
+def cmd_review_materials(config: dict):
+    """素材ループ: 素材をレビューして改善する"""
+    n = config.get("material_current_iteration", 0) + 1
+    material_max = config.get("material_max_iterations", 5)
+
+    if n > material_max:
+        print("STATUS: MATERIAL_MAX_ITERATIONS_REACHED")
+        print("ACTION: Run 'python orchestrator.py start-iteration' to begin article generation")
+        return
+
+    config["material_current_iteration"] = n
+    config["current_phase"] = "review-materials"
+    save_config(config)
+
+    print(f"ACTION: CALL_MATERIAL_REVIEWER (round {n}/{material_max})")
+    print(json.dumps({
+        "context_brief_path": config.get("context_brief", "context_brief.md"),
+        "dev_simulation_log_path": config["dev_simulation_log"],
+        "material_review_output_path": f"material_reviews/review_{n}.md",
+    }, indent=2, ensure_ascii=False))
+
+
+def cmd_after_material_review(config: dict, score: float):
+    """素材レビュー完了後"""
+    config.setdefault("material_scores", []).append({
+        "iteration": config["material_current_iteration"],
+        "score": score,
+    })
+    save_config(config)
+
+    print(f"MATERIAL_SCORE: {score}/10")
+
+    # 停滞検出
+    scores = [s["score"] for s in config["material_scores"]]
+    window = config.get("material_stagnation_window", 3)
+    tolerance = config.get("material_stagnation_tolerance", 0.5)
+    if len(scores) >= window:
+        recent = scores[-window:]
+        if max(recent) - min(recent) <= tolerance:
+            print(f"STATUS: MATERIAL_STAGNATION ({recent})")
+            print("ACTION: Run 'python orchestrator.py start-iteration' to begin article generation")
+            return
+
+    print("ACTION: CALL_MATERIAL_UPDATER")
+    print(json.dumps({
+        "context_brief_path": config.get("context_brief", "context_brief.md"),
+        "dev_simulation_log_path": config["dev_simulation_log"],
+        "material_review_path": f"material_reviews/review_{config['material_current_iteration']}.md",
+        "simulator_source_files": config["simulator_source_files"],
+        "instruction": "素材Reviewerの指摘に基づいてcontext_brief.mdとdev_simulation_log.mdを改善。ログの修正はsim_directorに検証させること。",
+    }, indent=2, ensure_ascii=False))
+
+
+def cmd_after_material_update(config: dict):
+    """素材更新完了後 → 次の素材レビューへ"""
+    print("ACTION: Run 'python orchestrator.py review-materials' for next material review round")
 
 
 def cmd_status(config: dict):
@@ -165,6 +229,7 @@ def cmd_start_iteration(config: dict):
         "article_output_path": f"iterations/{n}/article.md",
         "style_guide_path": "style_guide.md",
         "anti_patterns_log_path": config["anti_patterns_log"],
+        "context_brief_path": config.get("context_brief", "context_brief.md"),
         "dev_simulation_log_path": config["dev_simulation_log"],
         "article_purpose": config.get("article_purpose", ""),
         "reader_takeaway": config.get("reader_takeaway", ""),
@@ -267,6 +332,9 @@ COMMANDS = {
     "status": cmd_status,
     "simulate": cmd_simulate,
     "after-simulate": cmd_after_simulate,
+    "review-materials": cmd_review_materials,
+    # after-material-review は score 引数が必要なため main() で直接処理
+    "after-material-update": cmd_after_material_update,
     "start-iteration": cmd_start_iteration,
     "after-write": cmd_after_write,
     # after-review は score 引数が必要なため main() で直接処理
@@ -274,7 +342,7 @@ COMMANDS = {
     "after-consolidate": cmd_after_consolidate,
 }
 
-ALL_COMMANDS = list(COMMANDS.keys()) + ["after-review", "init"]
+ALL_COMMANDS = list(COMMANDS.keys()) + ["after-review", "after-material-review", "init"]
 
 
 def main():
@@ -292,6 +360,17 @@ def main():
             print("  Usage: python orchestrator.py init <file1> <file2> ...")
             sys.exit(1)
         cmd_init(config, sys.argv[2:])
+    elif cmd == "after-material-review":
+        if len(sys.argv) < 3:
+            print("ERROR: after-material-review requires a score argument")
+            print("  Usage: python orchestrator.py after-material-review <score>")
+            sys.exit(1)
+        try:
+            score = float(sys.argv[2])
+        except ValueError:
+            print(f"ERROR: Invalid score '{sys.argv[2]}' — must be a number")
+            sys.exit(1)
+        cmd_after_material_review(config, score)
     elif cmd == "after-review":
         if len(sys.argv) < 3:
             print("ERROR: after-review requires a score argument")
