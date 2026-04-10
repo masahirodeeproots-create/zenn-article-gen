@@ -303,6 +303,7 @@ def cmd_after_review(config: dict, score: float):
             "article_path": f"iterations/{n}/article.md",
             "changelog_output_path": f"iterations/{n}/changelog.md",
             "anti_patterns_log_path": config["anti_patterns_log"],
+            "style_guide_path": "style_guide.md",
         })
 
 
@@ -324,6 +325,7 @@ def cmd_after_consolidate(config: dict):
         "article_path": f"iterations/{n}/article.md",
         "changelog_output_path": f"iterations/{n}/changelog.md",
         "anti_patterns_log_path": config["anti_patterns_log"],
+        "style_guide_path": "style_guide.md",
         "note": "consolidationの後なので、新規ルール追加より既存ルールの精緻化を優先する",
     })
 

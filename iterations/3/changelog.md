@@ -1,11 +1,10 @@
-# Style Guide Changelog — Iteration 3
+# Changelog - Iteration 3
 
-**Score:** 7.5/10 (前回7.0 → +0.5)
-**Main improvements:** 類推の絞り込み成功（DDD, MVCCの2個）、核心に40%以上、カタログ感消滅
-**Remaining issues:** 感情語彙の偏り（怒り系のみ）、クロージングの教育者感
+## anti_patterns.md
+- 「前半の固定化」パターンを追加
 
-## Changes to anti_patterns.md
+## style_guide.md
+- 変更なし
 
-2パターン追記:
-1. 感情語彙の偏り — 怒り・辛さ以外（困惑、自嘲、拍子抜け）を追加すること
-2. クロージングの教育者ポジション — 「〜してみてください」ではなく未解決の問いで終わる
+## 理由
+スコア7.0→7.5。後半の改善は効いたが前半が固定化。次回は全体を書き直す。
