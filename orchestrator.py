@@ -99,6 +99,32 @@ def cmd_init(config: dict, source_files: list[str]):
 
 def cmd_simulate(config: dict):
     """Phase 0: 開発シミュレーションログの生成を開始"""
+    # 前回の成果物をクリア
+    iterations_dir = BASE_DIR / "iterations"
+    if iterations_dir.exists():
+        shutil.rmtree(iterations_dir)
+        print("CLEANED: iterations/ directory removed")
+    material_reviews_dir = BASE_DIR / "material_reviews"
+    if material_reviews_dir.exists():
+        shutil.rmtree(material_reviews_dir)
+        material_reviews_dir.mkdir()
+        print("CLEANED: material_reviews/ directory cleared")
+    for old_file in ["dev_simulation_log.md", "context_brief.md"]:
+        old_path = BASE_DIR / old_file
+        if old_path.exists():
+            old_path.unlink()
+            print(f"CLEANED: {old_file} removed")
+    # anti_patterns.mdをリセット
+    anti_path = BASE_DIR / config.get("anti_patterns_log", "anti_patterns.md")
+    anti_path.write_text(
+        "# Anti-Patterns Log\n\n"
+        "このファイルは反復ごとに蓄積されるアンチパターンの記録です。\n"
+        "Writerは記事生成前にこのファイルを読み、過去に指摘された失敗パターンを意識的に避けてください。\n\n"
+        "---\n\n"
+        "（まだ記録なし — Iteration 1完了後から追記されます）\n"
+    )
+    print("CLEANED: anti_patterns.md reset")
+
     # フルリセット
     config["current_phase"] = "simulate"
     config["current_iteration"] = 0
@@ -106,6 +132,8 @@ def cmd_simulate(config: dict):
     config["scores"] = []
     config["last_score"] = None
     config["status"] = "running"
+    config["material_scores"] = []
+    config["material_current_iteration"] = 0
     save_config(config)
 
     print("ACTION: CALL_DEV_SIMULATOR")
