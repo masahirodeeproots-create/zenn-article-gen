@@ -333,6 +333,55 @@ python orchestrator.py status
 
 ---
 
+## データアクセス層（BigQuery移行を前提）
+
+```
+knowledge_store.py
+  - 知識DBへの読み書きを集約
+  - 今はファイルI/O（knowledge/*.md, search_cache/*.json）
+  - 将来BigQueryクライアントに差し替えるだけ
+  - orchestrator.pyやエージェントはこの関数を呼ぶだけで、
+    裏がファイルかBigQueryかを知らない
+
+  関数:
+    save_trend(keyword, source, content, date)
+    save_pain(keyword, source, content, date)
+    search_trends(query, limit) -> list
+    search_pains(query, limit) -> list
+    is_cache_fresh(query_hash, max_age_days=7) -> bool
+    save_cache(query_hash, data)
+    load_cache(query_hash) -> data
+```
+
+---
+
+## 2度目以降のフロー（記事をまたぐとき）
+
+```
+python orchestrator.py init --source "新しいシステムのファイル"
+
+リセットされるもの:
+  ✅ config.json（新しいお題で上書き）
+  ✅ materials/（前の記事の素材を全削除）
+  ✅ iterations/（前の記事のイテレーションを全削除）
+  ✅ material_reviews/（クリア）
+  ✅ anti_patterns.md（リセット）
+
+保持されるもの:
+  ✅ knowledge/（蓄積型。記事をまたいで育つ）
+  ✅ human-bench/articles/（ペルソナ記事。固定）
+  ✅ style_guide.md（書き方の学びを引き継ぐ）
+  ✅ persona-elements.md 等の分析資料
+
+style_guide.mdの扱い:
+  引き継ぐ。ただし記事固有のルール（「KOLの説明を冒頭に」等）は
+  次の記事では不要になるため、initの時点で
+  Style Guide Updaterに「前の記事固有のルールを削除」を依頼する。
+  共通ルール（「カタログ構成はダメ」「冒頭2段構成」等）は残す。
+```
+
+---
+
 ## コード vs エージェントの責任分担
 
 | 責務 | 担当 | 理由 |
