@@ -1,72 +1,36 @@
 {
+  "topic": "",
+  "article_purpose": "",
+  "reader_takeaway": "",
+  "system_role": "",
+  "simulator_source_files": [],
+
+  "current_phase": "init",
+  "status": "running",
+
+  "benchmark_dir": "human-bench/articles",
+  "benchmark_sample_size": 5,
+  "benchmark_seed": null,
+  "current_benchmark_articles": [],
+
+  "material_max_iterations": 5,
+  "material_stagnation_window": 3,
+  "material_stagnation_tolerance": 0.5,
+  "material_current_iteration": 0,
+  "material_scores": [],
+
   "max_iterations": 10,
   "consolidation_at_iteration": 5,
   "stagnation_window": 3,
   "stagnation_tolerance": 0.5,
-  "current_iteration": 4,
-  "current_phase": "review",
-  "status": "complete",
-  "last_score": 8.0,
-  "scores": [
-    {
-      "iteration": 1,
-      "score": 6.5
-    },
-    {
-      "iteration": 2,
-      "score": 7.5
-    },
-    {
-      "iteration": 3,
-      "score": 7.5
-    },
-    {
-      "iteration": 4,
-      "score": 8.0
-    }
-  ],
-  "benchmark_dir": "human-bench/articles",
-  "benchmark_sample_size": 5,
+  "current_iteration": 0,
+  "scores": [],
+  "last_score": null,
+  "consecutive_above_threshold": 0,
+  "score_threshold": 9.0,
+
+  "dev_simulation_log": "materials/dev_simulation_log.md",
   "anti_patterns_log": "anti_patterns.md",
-  "dev_simulation_log": "dev_simulation_log.md",
-  "context_brief": "context_brief.md",
-  "simulator_score_threshold": 95,
-  "current_benchmark_articles": [
-    "/tmp/zenn-article-gen/human-bench/articles/7bade4112054c8.md",
-    "/tmp/zenn-article-gen/human-bench/articles/claude_code_mobile_web_extension.md",
-    "/tmp/zenn-article-gen/human-bench/articles/e2f38677f6a0ce.md",
-    "/tmp/zenn-article-gen/human-bench/articles/83fe82191db01b.md",
-    "/tmp/zenn-article-gen/human-bench/articles/harness-engineering-startup.md"
-  ],
-  "material_max_iterations": 5,
-  "material_stagnation_window": 3,
-  "material_stagnation_tolerance": 0.5,
-  "material_scores": [
-    {
-      "iteration": 1,
-      "score": 6.5
-    },
-    {
-      "iteration": 2,
-      "score": 7.5
-    },
-    {
-      "iteration": 3,
-      "score": 8.0
-    },
-    {
-      "iteration": 4,
-      "score": 8.0
-    }
-  ],
-  "material_current_iteration": 4,
-  "topic": "AIエージェント8体で1枚のPPTXを作る — 「誰が何を知るべきか」の設計",
-  "article_purpose": "AIエージェントでシステムを作る試行錯誤を通じて、マルチエージェント設計の全体像を読者が学べる体験記",
-  "reader_takeaway": "読者が自分のマルチエージェントシステムを設計するとき、同じ落とし穴を避けられる実践的な知見",
-  "system_role": "著者が実際に作ったシステムとして登場する。ただし記事の主役はシステムの仕様ではなく、作る過程で得た学び",
-  "simulator_source_files": [
-    "source-material/post-instructions-orchestrator-instructions.md",
-    "source-material/post-instructions-orchestrator-skill.md"
-  ],
-  "consecutive_above_threshold": 0
+
+  "simulator_score_threshold": 95
 }
