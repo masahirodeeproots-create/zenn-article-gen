@@ -1,0 +1,27 @@
+{
+  "date": "2026-04-13",
+  "topic": "KOL指示書をClaudeエージェント10体で全自動生成してみた — フェーズゲート・成果物駆動設計の実践記録",
+  "keywords_jp": ["マルチエージェント Claude 自動化", "フェーズゲート エージェント", "KOL インフルエンサー 指示書 AI 自動生成", "サブエージェント フィードバックループ", "成果物駆動 エージェント設計"],
+  "keywords_en": ["multi-agent orchestrator phase gate artifact", "agentic workflow orchestration claude subagent", "multi-agent workflow automation LLM", "KOL content automation agent AI", "generator evaluator separation harness"],
+  "sources_searched": ["zenn", "qiita", "hacker_news", "anthropic_engineering", "websearch"],
+  "new_trends_found": [
+    "generator-evaluator-separation",
+    "context-engineering-jit",
+    "agent-eval-three-layer",
+    "claude-code-subagent-feedback-loop"
+  ],
+  "new_pains_found": [
+    "harness-cost-complexity",
+    "subagent-context-exhaustion"
+  ],
+  "top_zenn_articles": [
+    {"title": "Claude Managed Agents を試してみた", "path": "/kumamo_tone/articles/365845d65e6cf4", "likes": 16},
+    {"title": "Claude Codeのマルチセッション管理にジョブキューの概念を取り入れる", "path": "/mh4gf/articles/claude-code-multi-session-job-queue", "likes": 10},
+    {"title": "Claude Code + Obsidian — Daily Note の下書きを自動生成", "path": "/dely_jp/articles/b8da42a57bbc39", "likes": 67}
+  ],
+  "top_anthropic_urls": [
+    "https://www.anthropic.com/engineering/harness-design-long-running-apps",
+    "https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents",
+    "https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents"
+  ]
+}

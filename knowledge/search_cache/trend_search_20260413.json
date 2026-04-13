@@ -1,0 +1,47 @@
+{
+  "date": "2026-04-13",
+  "topic": "AIエージェント10体に投稿指示書を作らせてみた — フェーズゲートとrun_idで品質を担保するまでに学んだこと",
+  "keywords_ja": ["マルチエージェント AI", "フェーズゲート 品質管理", "AIエージェント 自動化 品質", "run_id プロヴェナンス", "エージェント協調 設計"],
+  "keywords_en": ["multi-agent LLM pipeline quality", "AI agent orchestration provenance run_id", "LLM agent quality gate workflow artifact", "multi-agent AI system phase gate quality 2026"],
+  "sources": {
+    "qiita": {
+      "query": "マルチエージェント+AIエージェント",
+      "top_results": [
+        {"title": "hermes-agent：GitHub 67,000 Starの自己成長型AIエージェントの技術的仕組み", "likes": 4, "url": "https://qiita.com/nogataka/items/48328a49ae80dead6174"},
+        {"title": "ホワイトカラーの80%がAI導入に反抗している — AIエージェント自動化への抵抗の構造", "likes": 5, "url": "https://qiita.com/nogataka/items/4464273923cb00271303"}
+      ]
+    },
+    "zenn": {
+      "query": "マルチエージェント",
+      "top_results": [
+        {"title": "Claude Managed Agents を試してみた", "likes": 16, "url": "https://zenn.dev/kumamo_tone/articles/365845d65e6cf4"},
+        {"title": "Claude Codeのマルチセッション管理にジョブキューの概念を取り入れる", "likes": 10, "url": "https://zenn.dev/mh4gf/articles/claude-code-multi-session-job-queue"},
+        {"title": "AIスクラムチーム、人間にレビューしてもらう", "likes": 5, "url": "https://zenn.dev/microsoft/articles/ad363c9ff0585a"}
+      ]
+    },
+    "hn": {
+      "query": "multi-agent LLM pipeline quality",
+      "top_results": [
+        {"title": "I built a governance layer for multi-agent AI coding – lessons after 6 months", "points": 2, "url": "https://news.ycombinator.com/item?id=47139978"}
+      ]
+    },
+    "anthropic": {
+      "urls_fetched": [
+        "https://www.anthropic.com/engineering/managed-agents",
+        "https://www.anthropic.com/engineering/building-effective-agents"
+      ],
+      "key_insights": [
+        "brain/hands/session分離アーキテクチャ。ステートレスharnessでtime-to-first-token p50 60%改善",
+        "エージェント設計はシンプルさ・透明性・ツール設計の3原則。agent-computer interface (ACI) を入念に設計することが成功の鍵"
+      ]
+    },
+    "web_search": {
+      "key_findings": [
+        "2026年はマルチエージェント移行加速期。エラー率60%削減・速度40%改善が報告",
+        "Verifiable Execution: エージェントが何をしたか証明できることが最重要設計決定",
+        "ZennはAI自動生成大量投稿を規約禁止。著者主体の記事を優遇する新アルゴリズムを2026-04-08導入",
+        "決定論的品質ゲート（LLMではなくルールベース検証）が実践パターンとして台頭"
+      ]
+    }
+  }
+}

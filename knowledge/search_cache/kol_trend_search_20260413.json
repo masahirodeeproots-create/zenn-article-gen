@@ -1,0 +1,35 @@
+{
+  "date": "2026-04-13",
+  "topic": "AIエージェント10体でKOL投稿指示書デッキを全自動生成してみた",
+  "keywords_jp": ["マルチエージェント コンテンツ生成", "AIエージェント SNS 自動生成", "インフルエンサー AIエージェント", "KOL AIエージェント 投稿指示書"],
+  "keywords_en": ["multi-agent content generation KOL", "multi-agent workflow document generation", "AI agents social media automation influencer", "multi-agent AI content brief generation 2026"],
+  "sources_checked": [
+    "qiita.com/api/v2",
+    "zenn.dev/api",
+    "hn.algolia.com/api/v1",
+    "anthropic.com/engineering/multi-agent-research-system",
+    "anthropic.com/engineering/effective-harnesses-for-long-running-agents",
+    "trysight.ai/blog/multi-agent-ai-content-generation",
+    "fast.io/resources/ai-agent-social-media-automation",
+    "noimosai.com/en/blog"
+  ],
+  "trends_found": [
+    "multi-agent-parallel-research-90pct-gain",
+    "content-brief-one-to-eight-assets",
+    "visual-canvas-multi-agent-deliverable",
+    "harness-initializer-plus-checklist"
+  ],
+  "pains_found": [
+    "kol-personalization-gap",
+    "creative-quality-evaluation-subjectivity",
+    "agent-role-granularity-decision"
+  ],
+  "notable_data_points": {
+    "anthropic_multi_agent_perf_gain": "90.2% over single-agent Opus4",
+    "content_automation_overhead_reduction": "80% marketing overhead reduction",
+    "content_production_multiplier": "10x content production",
+    "research_time_reduction": "up to 90% for complex queries",
+    "spine_swarm_hn_score": 109,
+    "zenn_daily_note_article_likes": 67
+  }
+}

@@ -75,7 +75,7 @@ def call_agent(agent_name: str, prompt: str, model: str = "sonnet") -> str:
         capture_output=True,
         text=True,
         cwd=str(BASE_DIR),
-        timeout=600,  # 10分タイムアウト
+        timeout=1800,  # 30分タイムアウト
     )
 
     if result.returncode != 0:
@@ -329,9 +329,9 @@ def phase_simulate(config: dict):
 {log_path}
 
 ## 重要
-- 3エージェントを独立サブエージェントとして呼び出してください
-- 最大7ラウンド、Directorスコア≥95でSTOP
-""", model="opus")
+- 3エージェントの発言を生成してください（1つのAIが3つの視点で書いてOK。速度優先）
+- 最大5ラウンド、Directorスコア≥95でSTOP
+""")
 
     if not log_path.exists():
         raise RuntimeError("Dev Simulator failed: log not found")

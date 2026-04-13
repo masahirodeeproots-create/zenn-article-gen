@@ -1,36 +1,74 @@
 {
-  "topic": "",
-  "article_purpose": "",
-  "reader_takeaway": "",
-  "system_role": "",
-  "simulator_source_files": [],
-
-  "current_phase": "init",
-  "status": "running",
-
+  "topic": "KOL指示書をClaudeエージェント10体で全自動生成してみた — フェーズゲート・成果物駆動設計の実践記録",
+  "article_purpose": "試行錯誤を通じて、Claudeのサブエージェント・成果物ゲート・フェーズ分割・run_idプロヴェナンスといったマルチエージェント設計パターンを学べる体験記",
+  "reader_takeaway": "複雑な業務ワークフローをマルチエージェント化する際の設計パターン（フェーズゲート・成果物ファースト・役割分担・Fix Loop）を自分のプロジェクトに転用できる具体的な知識",
+  "system_role": "具体例として登場する。主役はシステムではなく『フェーズゲートと成果物駆動でどこまでエージェントを自律化できるか』という学び",
+  "simulator_source_files": [
+    "source-material/post-instructions-orchestrator-instructions.md",
+    "source-material/post-instructions-orchestrator-skill.md",
+    "source-material/planner-post-instructions.md",
+    "source-material/builder-post-instructions.md",
+    "source-material/reviewer-post-instructions.md",
+    "source-material/visualizer-post-instructions.md",
+    "source-material/kol-research-aggregator.md",
+    "source-material/kol-creative-worker.md",
+    "source-material/asset-acquisition.md",
+    "source-material/asset-resolver.md",
+    "source-material/global-style-generator.md"
+  ],
+  "current_phase": "review",
+  "status": "complete",
   "benchmark_dir": "human-bench/articles",
   "benchmark_sample_size": 5,
-  "benchmark_seed": null,
-  "current_benchmark_articles": [],
-
+  "benchmark_seed": 2080748043,
+  "current_benchmark_articles": [
+    "/tmp/zenn-article-gen/human-bench/articles/5fee11d03a11a1.md",
+    "/tmp/zenn-article-gen/human-bench/articles/0420ecec9526dc.md",
+    "/tmp/zenn-article-gen/human-bench/articles/39fb763aca746c.md",
+    "/tmp/zenn-article-gen/human-bench/articles/cd04dd1350bac5.md",
+    "/tmp/zenn-article-gen/human-bench/articles/design-system-skills.md"
+  ],
   "material_max_iterations": 5,
   "material_stagnation_window": 3,
   "material_stagnation_tolerance": 0.5,
-  "material_current_iteration": 0,
-  "material_scores": [],
-
+  "material_current_iteration": 3,
+  "material_scores": [
+    {
+      "iteration": 1,
+      "score": 6.0
+    },
+    {
+      "iteration": 2,
+      "score": 5.5
+    },
+    {
+      "iteration": 3,
+      "score": 5.5
+    }
+  ],
   "max_iterations": 10,
   "consolidation_at_iteration": 5,
   "stagnation_window": 3,
   "stagnation_tolerance": 0.5,
-  "current_iteration": 0,
-  "scores": [],
-  "last_score": null,
+  "current_iteration": 3,
+  "scores": [
+    {
+      "iteration": 1,
+      "score": 7.5
+    },
+    {
+      "iteration": 2,
+      "score": 7.0
+    },
+    {
+      "iteration": 3,
+      "score": 7.5
+    }
+  ],
+  "last_score": 7.5,
   "consecutive_above_threshold": 0,
   "score_threshold": 9.0,
-
   "dev_simulation_log": "materials/dev_simulation_log.md",
   "anti_patterns_log": "anti_patterns.md",
-
   "simulator_score_threshold": 95
 }
