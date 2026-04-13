@@ -1,25 +1,23 @@
 #!/usr/bin/env python3
 """
-Zenn Article Generator — Orchestrator v2.0
+Zenn Article Generator — Orchestrator v3.0 (AutoAgent方式)
 
-コードが担う責務（判断不要な処理のみ）:
-- イテレーション番号の管理
-- ディレクトリ作成・ファイルコピー・クリア
-- スコアの記録・停滞検出・2連続9.0以上検出
-- ベンチマーク記事のランダムサンプリング（seed記録）
-- 検索キャッシュの重複チェック
+MetaChainとして機能する:
+  - エージェントを自動呼び出し（claude -p）
+  - 結果を自動解析（スコア抽出、成果物確認）
+  - 次ステップを自動判断して実行
+  - 終了条件まで自律ループ
 
-エージェントが担う責務（判断が必要な全て）:
-- 検索・分析・生成・評価・改善
-
-フロー:
-  init → analyze-code → search-trends → simulate →
-  review-materials(loop) → start-iteration(loop) → 完成
+`python orchestrator.py run --source file1.md file2.md`
+で Phase 0→完成まで全自動完走する。
 """
 
 import json
+import os
 import random
+import re
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -27,9 +25,12 @@ import knowledge_store
 
 BASE_DIR = Path("/tmp/zenn-article-gen")
 CONFIG_PATH = BASE_DIR / "config.json"
+AGENTS_DIR = BASE_DIR / ".claude" / "agents"
 
 
-# --- Config I/O ---
+# ============================================================
+# Config I/O
+# ============================================================
 
 def load_config() -> dict:
     with open(CONFIG_PATH, encoding="utf-8") as f:
@@ -41,22 +42,74 @@ def save_config(config: dict):
         json.dump(config, f, indent=2, ensure_ascii=False)
 
 
-def print_agent_context(config: dict, extra: dict = None):
-    """エージェントに渡す情報をJSON出力"""
-    ctx = {
-        "iteration": config.get("current_iteration", 0),
-        "phase": config["current_phase"],
-        "topic": config.get("topic", ""),
-    }
-    if extra:
-        ctx.update(extra)
-    print(json.dumps(ctx, indent=2, ensure_ascii=False))
+def log(msg: str):
+    """進捗ログ（標準出力）"""
+    print(f"[orchestrator] {msg}", flush=True)
 
 
-# --- Utility ---
+# ============================================================
+# Agent Execution — MetaChain の核心
+# ============================================================
+
+def call_agent(agent_name: str, prompt: str, model: str = "sonnet") -> str:
+    """claude -p でサブエージェントを実行し、出力テキストを返す。
+
+    Args:
+        agent_name: ログ用のエージェント名
+        prompt: エージェントに渡すプロンプト全文
+        model: 使用モデル (sonnet / opus / haiku)
+    Returns:
+        エージェントの出力テキスト
+    """
+    log(f"CALL {agent_name} (model={model})")
+
+    result = subprocess.run(
+        [
+            "claude", "-p", prompt,
+            "--model", model,
+            "--output-format", "text",
+            "--permission-mode", "bypassPermissions",
+            "--max-turns", "30",
+            "--add-dir", str(BASE_DIR),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(BASE_DIR),
+        timeout=600,  # 10分タイムアウト
+    )
+
+    if result.returncode != 0:
+        log(f"ERROR: {agent_name} failed (rc={result.returncode})")
+        log(f"stderr: {result.stderr[:500]}")
+        raise RuntimeError(f"Agent {agent_name} failed")
+
+    output = result.stdout
+    log(f"DONE {agent_name} ({len(output)} chars)")
+    return output
+
+
+def extract_score(text: str) -> float | None:
+    """エージェント出力から 'Overall: X/10' パターンでスコアを抽出"""
+    # ファイルから読む場合も対応
+    m = re.search(r"Overall:\s*([\d.]+)\s*/\s*10", text)
+    if m:
+        return float(m.group(1))
+    return None
+
+
+def read_agent_def(name: str) -> str:
+    """エージェント定義ファイルを読む"""
+    path = AGENTS_DIR / f"{name}.md"
+    if path.exists():
+        return path.read_text(encoding="utf-8")
+    return ""
+
+
+# ============================================================
+# Utility
+# ============================================================
 
 def sample_benchmark_articles(config: dict) -> list[str]:
-    """benchmark_dirからランダムにN本サンプリング。seedを記録。"""
     benchmark_dir = BASE_DIR / config["benchmark_dir"]
     all_articles = sorted(benchmark_dir.glob("*.md"))
     n = config.get("benchmark_sample_size", 5)
@@ -68,7 +121,6 @@ def sample_benchmark_articles(config: dict) -> list[str]:
 
 
 def setup_iteration_dir(n: int) -> Path:
-    """イテレーションディレクトリを作成し、style_guide.mdをアーカイブ"""
     iter_dir = BASE_DIR / "iterations" / str(n)
     iter_dir.mkdir(parents=True, exist_ok=True)
     sg = BASE_DIR / "style_guide.md"
@@ -78,7 +130,6 @@ def setup_iteration_dir(n: int) -> Path:
 
 
 def check_stagnation(scores: list[dict], window: int, tolerance: float) -> bool:
-    """直近window回のスコアが±tolerance以内なら停滞"""
     vals = [s["score"] for s in scores]
     if len(vals) < window:
         return False
@@ -86,15 +137,25 @@ def check_stagnation(scores: list[dict], window: int, tolerance: float) -> bool:
     return max(recent) - min(recent) <= tolerance
 
 
-# --- Commands ---
+def source_files_prompt(config: dict) -> str:
+    """ソースファイル一覧をプロンプト用に整形"""
+    files = config["simulator_source_files"]
+    return "\n".join(f"- {BASE_DIR / f}" for f in files)
 
-def cmd_init(config: dict, source_files: list[str]):
-    """ソースファイル指定。成果物クリア+知識DB保持+Code Analyzer呼び出し"""
+
+# ============================================================
+# Phase Executors — 各フェーズを自動実行
+# ============================================================
+
+def phase_init(config: dict, source_files: list[str]):
+    """init: 成果物クリア+知識DB保持"""
+    log("=== PHASE: INIT ===")
+
     # ソースファイル存在確認
     for f in source_files:
         path = BASE_DIR / f if not Path(f).is_absolute() else Path(f)
         if not path.exists():
-            print(f"ERROR: Source file not found: {f}")
+            log(f"ERROR: Source file not found: {f}")
             sys.exit(1)
 
     # materials/ を全削除して再作成
@@ -103,37 +164,29 @@ def cmd_init(config: dict, source_files: list[str]):
         shutil.rmtree(materials_dir)
     materials_dir.mkdir(parents=True)
     (materials_dir / "fixed").mkdir()
-    print("CLEANED: materials/ recreated")
 
     # iterations/ を全削除
     iterations_dir = BASE_DIR / "iterations"
     if iterations_dir.exists():
         shutil.rmtree(iterations_dir)
-        print("CLEANED: iterations/ removed")
 
     # material_reviews/ をクリア
     mr_dir = BASE_DIR / "material_reviews"
     if mr_dir.exists():
         shutil.rmtree(mr_dir)
     mr_dir.mkdir(parents=True, exist_ok=True)
-    print("CLEANED: material_reviews/ cleared")
 
     # anti_patterns.md をリセット
-    anti_path = BASE_DIR / "anti_patterns.md"
-    anti_path.write_text(
+    (BASE_DIR / "anti_patterns.md").write_text(
         "# Anti-Patterns Log\n\n"
         "このファイルは反復ごとに蓄積されるアンチパターンの記録です。\n"
         "Writerは記事生成前にこのファイルを読み、過去に指摘された失敗パターンを意識的に避けてください。\n\n"
         "---\n\n"
         "（まだ記録なし — Iteration 1完了後から追記されます）\n"
     )
-    print("CLEANED: anti_patterns.md reset")
 
-    # knowledge/ を保持（なければ作成）
     knowledge_store.init_knowledge_dir()
-    print("KEPT: knowledge/ preserved")
 
-    # config をリセット
     config["simulator_source_files"] = source_files
     config["topic"] = ""
     config["article_purpose"] = ""
@@ -151,417 +204,443 @@ def cmd_init(config: dict, source_files: list[str]):
     config["benchmark_seed"] = None
     save_config(config)
 
-    # Style Guide Updaterに記事固有ルール削除を依頼
+    # Style Guide Updater (init cleanup)
     sg = BASE_DIR / "style_guide.md"
     if sg.exists():
-        print("ACTION: CALL_STYLE_GUIDE_UPDATER")
-        print_agent_context(config, {
-            "style_guide_path": "style_guide.md",
-            "task": "init_cleanup",
-            "instruction": "前の記事固有のルールを削除する。共通ルール（カタログ構成はダメ、冒頭2段構成等）は残す。",
-        })
-        print("---")
+        log("Style Guide cleanup...")
+        call_agent("style_guide_updater", f"""
+あなたはStyle Guide Updater Agentです。
 
-    # Code Analyzerを呼び出し
-    print("ACTION: CALL_CODE_ANALYZER")
-    print_agent_context(config, {
-        "source_files": source_files,
-        "output_dir": "materials/fixed/",
-        "outputs": [
-            "system_overview.md",
-            "metrics.md",
-            "architecture.md",
-            "code_examples.md",
-            "comparisons.md",
-        ],
-        "config_fields_to_generate": ["topic", "article_purpose", "reader_takeaway", "system_role"],
-        "instruction": "1) ソースファイルを読んでtopic, article_purpose, reader_takeaway, system_roleを生成しconfig.jsonに書き込む 2) 固定素材5つをmaterials/fixed/に生成する",
-    })
+{read_agent_def("style_guide_updater")}
+
+今回のタスク: init_cleanup
+{BASE_DIR / "style_guide.md"} を読んで、前の記事固有のルールを削除してください。
+共通ルール（カタログ構成はダメ、冒頭2段構成等）は残してください。
+上書き保存してください。
+""")
+
+    log("INIT complete")
 
 
-def cmd_analyze_code(config: dict):
-    """Phase 1: Code Analyzer呼び出し（initから分離実行する場合用）"""
+def phase_analyze_code(config: dict):
+    """Phase 1: Code Analyzer — topic + 固定素材5つ生成"""
+    log("=== PHASE 1: ANALYZE CODE ===")
+
     config["current_phase"] = "analyze-code"
     save_config(config)
 
-    print("ACTION: CALL_CODE_ANALYZER")
-    print_agent_context(config, {
-        "source_files": config["simulator_source_files"],
-        "output_dir": "materials/fixed/",
-        "outputs": [
-            "system_overview.md",
-            "metrics.md",
-            "architecture.md",
-            "code_examples.md",
-            "comparisons.md",
-        ],
-        "config_fields_to_generate": ["topic", "article_purpose", "reader_takeaway", "system_role"],
-    })
+    sources = source_files_prompt(config)
+    call_agent("code_analyzer", f"""
+あなたはCode Analyzer Agentです。
 
+{read_agent_def("code_analyzer")}
 
-def cmd_after_analyze_code(config: dict):
-    """Code Analyzer完了後"""
+## ソースファイル
+{sources}
+
+全ファイルを読んで以下を実行してください:
+
+1. config.jsonのフィールド生成:
+   {CONFIG_PATH} を読んで topic, article_purpose, reader_takeaway, system_role を生成し、
+   config.jsonに書き込んでください（他のフィールドは変更しない）。
+
+2. 固定素材5ファイルを {BASE_DIR / "materials" / "fixed"} に生成:
+   - system_overview.md, metrics.md, architecture.md, code_examples.md, comparisons.md
+""")
+
+    # 検証
+    config = load_config()  # Code Analyzerが更新したconfigを再読み込み
     fixed_dir = BASE_DIR / "materials" / "fixed"
-    required = ["system_overview.md", "metrics.md", "architecture.md",
-                "code_examples.md", "comparisons.md"]
-    for fname in required:
+    for fname in ["system_overview.md", "metrics.md", "architecture.md",
+                  "code_examples.md", "comparisons.md"]:
         if not (fixed_dir / fname).exists():
-            print(f"ERROR: materials/fixed/{fname} not found. Code Analyzer may have failed.")
-            sys.exit(1)
+            raise RuntimeError(f"Code Analyzer failed: {fname} not found")
 
     if not config.get("topic"):
-        print("ERROR: topic is empty. Code Analyzer did not generate config fields.")
-        sys.exit(1)
+        raise RuntimeError("Code Analyzer failed: topic is empty")
 
     config["current_phase"] = "code-analyzed"
     save_config(config)
-
-    print("STATUS: CODE_ANALYSIS_COMPLETE")
-    print("ACTION: Run 'python orchestrator.py search-trends'")
+    log(f"Phase 1 complete. topic={config['topic']}")
 
 
-def cmd_search_trends(config: dict):
-    """Phase 0: Trend Searcher呼び出し"""
-    if not config.get("topic"):
-        print("ERROR: topic is empty. Run analyze-code first.")
-        sys.exit(1)
+def phase_search_trends(config: dict):
+    """Phase 0: Trend Searcher — トレンド・痛み検索"""
+    log("=== PHASE 0: SEARCH TRENDS ===")
 
     config["current_phase"] = "search-trends"
     save_config(config)
 
-    print("ACTION: CALL_TREND_SEARCHER")
-    print_agent_context(config, {
-        "knowledge_dir": "knowledge/",
-        "trend_output": "materials/trend_context.md",
-        "pain_output": "materials/reader_pain.md",
-    })
+    call_agent("trend_searcher", f"""
+あなたはTrend Searcher Agentです。
 
+{read_agent_def("trend_searcher")}
 
-def cmd_after_search_trends(config: dict):
-    """Trend Searcher完了後"""
+## topic
+{config["topic"]}
+
+## 出力先
+- {BASE_DIR / "materials" / "trend_context.md"}（3-5個のトレンド）
+- {BASE_DIR / "materials" / "reader_pain.md"}（3-5個の読者の痛み）
+
+## knowledge DBへの蓄積
+- {BASE_DIR / "knowledge" / "trends.md"} に追記
+- {BASE_DIR / "knowledge" / "reader_pains.md"} に追記
+""")
+
+    # 検証
     for fname in ["materials/trend_context.md", "materials/reader_pain.md"]:
         if not (BASE_DIR / fname).exists():
-            print(f"ERROR: {fname} not found. Trend Searcher may have failed.")
-            sys.exit(1)
+            raise RuntimeError(f"Trend Searcher failed: {fname} not found")
 
     config["current_phase"] = "trends-ready"
     save_config(config)
-
-    print("STATUS: TREND_SEARCH_COMPLETE")
-    print("ACTION: Run 'python orchestrator.py simulate'")
+    log("Phase 0 complete")
 
 
-def cmd_simulate(config: dict):
-    """Phase 2: Dev Simulator呼び出し"""
-    # dev_simulation_log をクリア
+def phase_simulate(config: dict):
+    """Phase 2a: Dev Simulator — 体験ストーリー生成"""
+    log("=== PHASE 2a: SIMULATE ===")
+
     log_path = BASE_DIR / config["dev_simulation_log"]
     if log_path.exists():
         log_path.unlink()
-        print(f"CLEANED: {config['dev_simulation_log']} removed")
 
     config["current_phase"] = "simulate"
     config["material_scores"] = []
     config["material_current_iteration"] = 0
     save_config(config)
 
-    print("ACTION: CALL_DEV_SIMULATOR")
-    print_agent_context(config, {
-        "simulator_source_files": config["simulator_source_files"],
-        "dev_simulation_log_path": config["dev_simulation_log"],
-        "simulator_score_threshold": config["simulator_score_threshold"],
-        "system_overview_path": "materials/fixed/system_overview.md",
-        "trend_context_path": "materials/trend_context.md",
-        "reader_pain_path": "materials/reader_pain.md",
-    })
+    sources = source_files_prompt(config)
+    call_agent("dev_simulator", f"""
+あなたはDev Simulator（Round Controller）です。
 
+{read_agent_def("dev_simulator")}
 
-def cmd_after_simulate(config: dict):
-    """Simulator完了後"""
-    log_path = BASE_DIR / config["dev_simulation_log"]
+## 完成形のソースファイル（Director用）
+{sources}
+
+## 参照素材
+- {BASE_DIR / "materials" / "fixed" / "system_overview.md"}（Human役用）
+- {BASE_DIR / "materials" / "trend_context.md"}（Human役用）
+- {BASE_DIR / "materials" / "reader_pain.md"}（Director役用）
+
+## 出力先
+{log_path}
+
+## 重要
+- 3エージェントを独立サブエージェントとして呼び出してください
+- 最大7ラウンド、Directorスコア≥95でSTOP
+""", model="opus")
+
     if not log_path.exists():
-        print("ERROR: dev_simulation_log.md not found. Simulator may have failed.")
-        sys.exit(1)
+        raise RuntimeError("Dev Simulator failed: log not found")
 
     config["current_phase"] = "ready"
     save_config(config)
-
-    print("STATUS: SIMULATION_COMPLETE")
-    print("ACTION: Run 'python orchestrator.py review-materials'")
+    log("Phase 2a complete")
 
 
-def cmd_review_materials(config: dict):
-    """素材改善ループ: Material Reviewer呼び出し"""
-    n = config["material_current_iteration"] + 1
+def phase_review_materials(config: dict):
+    """Phase 2b: 素材改善ループ"""
+    log("=== PHASE 2b: MATERIAL REVIEW LOOP ===")
+
     material_max = config["material_max_iterations"]
 
-    if n > material_max:
-        print("STATUS: MATERIAL_MAX_ITERATIONS_REACHED")
-        print("ACTION: Run 'python orchestrator.py start-iteration'")
-        return
-
-    config["material_current_iteration"] = n
-    config["current_phase"] = "review-materials"
-    save_config(config)
-
-    print(f"ACTION: CALL_MATERIAL_REVIEWER (round {n}/{material_max})")
-    print_agent_context(config, {
-        "dev_simulation_log_path": config["dev_simulation_log"],
-        "system_overview_path": "materials/fixed/system_overview.md",
-        "material_review_output_path": f"material_reviews/review_{n}.md",
-    })
-
-
-def cmd_after_material_review(config: dict, score: float):
-    """素材レビュー完了後"""
-    config["material_scores"].append({
-        "iteration": config["material_current_iteration"],
-        "score": score,
-    })
-    save_config(config)
-
-    print(f"MATERIAL_SCORE: {score}/10")
-
-    if check_stagnation(config["material_scores"],
-                        config["material_stagnation_window"],
-                        config["material_stagnation_tolerance"]):
-        recent = [s["score"] for s in config["material_scores"][-config["material_stagnation_window"]:]]
-        print(f"STATUS: MATERIAL_STAGNATION ({recent})")
-        print("ACTION: Run 'python orchestrator.py start-iteration'")
-        return
-
-    print("ACTION: CALL_MATERIAL_UPDATER")
-    print_agent_context(config, {
-        "dev_simulation_log_path": config["dev_simulation_log"],
-        "material_review_path": f"material_reviews/review_{config['material_current_iteration']}.md",
-        "simulator_source_files": config["simulator_source_files"],
-        "instruction": "素材Reviewerの指摘に基づいてdev_simulation_log.mdを改善。ログの修正はsim_directorに検証させること。",
-    })
-
-
-def cmd_after_material_update(config: dict):
-    """素材更新完了後 → 次の素材レビューへ"""
-    print("ACTION: Run 'python orchestrator.py review-materials'")
-
-
-def cmd_start_iteration(config: dict):
-    """Phase 3: 記事改善ループ開始。Writer呼び出し"""
-    if config.get("status") == "complete":
-        print("STATUS: ALREADY_COMPLETE")
-        return
-
-    n = config["current_iteration"] + 1
-    if n > config["max_iterations"]:
-        print("STATUS: MAX_ITERATIONS_REACHED")
-        config["status"] = "complete"
+    while config["material_current_iteration"] < material_max:
+        n = config["material_current_iteration"] + 1
+        config["material_current_iteration"] = n
+        config["current_phase"] = "review-materials"
         save_config(config)
-        return
 
-    sampled = sample_benchmark_articles(config)
-    config["current_benchmark_articles"] = sampled
+        # --- Material Reviewer ---
+        log(f"Material Review round {n}/{material_max}")
+        review_path = BASE_DIR / "material_reviews" / f"review_{n}.md"
 
-    setup_iteration_dir(n)
-    config["current_iteration"] = n
-    config["current_phase"] = "write"
-    save_config(config)
+        call_agent("material_reviewer", f"""
+あなたはMaterial Reviewer Agentです。
 
-    print("ACTION: CALL_WRITER")
-    print(f"BENCHMARK_SAMPLE: {len(sampled)} articles (seed={config['benchmark_seed']})")
-    print_agent_context(config, {
-        "article_output_path": f"iterations/{n}/article.md",
-        "style_guide_path": "style_guide.md",
-        "anti_patterns_log_path": config["anti_patterns_log"],
-        "dev_simulation_log_path": config["dev_simulation_log"],
-        "article_purpose": config.get("article_purpose", ""),
-        "reader_takeaway": config.get("reader_takeaway", ""),
-        "system_role": config.get("system_role", ""),
-        "fixed_materials": [
-            "materials/fixed/system_overview.md",
-            "materials/fixed/metrics.md",
-            "materials/fixed/architecture.md",
-            "materials/fixed/code_examples.md",
-            "materials/fixed/comparisons.md",
-        ],
-    })
+{read_agent_def("material_reviewer")}
 
+## 読むもの
+1. {BASE_DIR / "materials" / "fixed" / "system_overview.md"}
+2. {BASE_DIR / config["dev_simulation_log"]}
+3. {BASE_DIR / "human-bench" / "articles"} 配下のペルソナ記事全部
 
-def cmd_after_write(config: dict):
-    """Writer完了後 → Reviewer呼び出し"""
-    n = config["current_iteration"]
-    article_path = BASE_DIR / "iterations" / str(n) / "article.md"
+## 出力先
+{review_path}
 
-    if not article_path.exists():
-        print("ERROR: article.md not found. Writer may have failed.")
-        sys.exit(1)
+必ず `Overall: X/10` の形式でスコアを含めてください。
+""")
 
-    config["current_phase"] = "review"
-    save_config(config)
+        # スコア抽出
+        if not review_path.exists():
+            raise RuntimeError(f"Material Reviewer failed: {review_path} not found")
 
-    print("ACTION: CALL_REVIEWER")
-    print_agent_context(config, {
-        "article_path": f"iterations/{n}/article.md",
-        "review_output_path": f"iterations/{n}/review.md",
-        "benchmark_articles": config["current_benchmark_articles"],
-    })
+        review_text = review_path.read_text(encoding="utf-8")
+        score = extract_score(review_text)
+        if score is None:
+            log(f"WARNING: Could not extract score from review_{n}.md, defaulting to 5.0")
+            score = 5.0
 
-
-def cmd_after_review(config: dict, score: float):
-    """Reviewer完了後 → 停止判定 or 次のアクション"""
-    n = config["current_iteration"]
-
-    config["last_score"] = score
-    config["scores"].append({"iteration": n, "score": score})
-
-    # 2連続 ≥ 9.0 チェック
-    threshold = config.get("score_threshold", 9.0)
-    if score >= threshold:
-        config["consecutive_above_threshold"] = config.get("consecutive_above_threshold", 0) + 1
-    else:
-        config["consecutive_above_threshold"] = 0
-
-    save_config(config)
-    print(f"SCORE: {score}/10 (consecutive_above_threshold: {config['consecutive_above_threshold']})")
-
-    if config["consecutive_above_threshold"] >= 2:
-        print("ACTION: STOP  # 2 consecutive scores >= 9.0")
-        config["status"] = "complete"
+        config["material_scores"].append({"iteration": n, "score": score})
         save_config(config)
-        return
+        log(f"Material score: {score}/10")
 
-    # 停滞検出
-    if check_stagnation(config["scores"],
-                        config["stagnation_window"],
-                        config["stagnation_tolerance"]):
-        recent = [s["score"] for s in config["scores"][-config["stagnation_window"]:]]
-        print(f"ACTION: STOP  # stagnation detected: {recent}")
-        config["status"] = "complete"
+        # 停滞検出
+        if check_stagnation(config["material_scores"],
+                            config["material_stagnation_window"],
+                            config["material_stagnation_tolerance"]):
+            recent = [s["score"] for s in config["material_scores"][-config["material_stagnation_window"]:]]
+            log(f"Material stagnation detected: {recent}")
+            break
+
+        if n >= material_max:
+            log("Material max iterations reached")
+            break
+
+        # --- Material Updater ---
+        log(f"Material Update round {n}")
+        sources = source_files_prompt(config)
+
+        call_agent("material_updater", f"""
+あなたはMaterial Updater Agentです。
+
+{read_agent_def("material_updater")}
+
+## 読むもの
+1. {BASE_DIR / config["dev_simulation_log"]}（改善対象）
+2. {review_path}（Reviewerの指摘）
+3. ソースファイル（事実確認用）:
+{sources}
+
+dev_simulation_log.md を改善して上書き保存してください。
+""")
+
+    log("Phase 2b complete")
+
+
+def phase_article_loop(config: dict):
+    """Phase 3: 記事生成+改善ループ"""
+    log("=== PHASE 3: ARTICLE LOOP ===")
+
+    while True:
+        n = config["current_iteration"] + 1
+
+        if n > config["max_iterations"]:
+            log("Max iterations reached")
+            config["status"] = "complete"
+            save_config(config)
+            break
+
+        # --- ベンチマークサンプリング + ディレクトリ準備 ---
+        sampled = sample_benchmark_articles(config)
+        config["current_benchmark_articles"] = sampled
+        setup_iteration_dir(n)
+        config["current_iteration"] = n
+        config["current_phase"] = "write"
         save_config(config)
-        return
 
-    if n >= config["max_iterations"]:
-        print(f"ACTION: STOP  # max iterations ({config['max_iterations']}) reached")
-        config["status"] = "complete"
+        log(f"--- Iteration {n} (seed={config['benchmark_seed']}) ---")
+
+        # --- Writer ---
+        article_path = f"iterations/{n}/article.md"
+        benchmark_list = "\n".join(f"- {p}" for p in sampled)
+        fixed_list = "\n".join(
+            f"- {BASE_DIR / 'materials' / 'fixed' / f}"
+            for f in ["system_overview.md", "metrics.md", "architecture.md",
+                      "code_examples.md", "comparisons.md"]
+        )
+
+        call_agent("writer", f"""
+あなたはWriter Agentです。
+
+{read_agent_def("writer")}
+
+## 記事の目的
+- article_purpose: {config.get("article_purpose", "")}
+- reader_takeaway: {config.get("reader_takeaway", "")}
+- system_role: {config.get("system_role", "")}
+
+## 読むもの
+- 固定素材:
+{fixed_list}
+- 体験ストーリー: {BASE_DIR / config["dev_simulation_log"]}
+- スタイルガイド: {BASE_DIR / "style_guide.md"}
+- アンチパターン: {BASE_DIR / "anti_patterns.md"}
+
+## 出力先
+{BASE_DIR / article_path}
+
+human-bench/articles/ は絶対に読まないでください。
+""")
+
+        if not (BASE_DIR / article_path).exists():
+            raise RuntimeError(f"Writer failed: {article_path} not found")
+
+        config["current_phase"] = "review"
         save_config(config)
-        return
 
-    # Consolidation判定
-    if n == config.get("consolidation_at_iteration"):
-        config["current_phase"] = "consolidate"
+        # --- Reviewer ---
+        review_path = f"iterations/{n}/review.md"
+
+        call_agent("reviewer", f"""
+あなたはReviewer Agentです。
+
+{read_agent_def("reviewer")}
+
+## 読むもの
+1. {BASE_DIR / article_path}（評価対象）
+2. ベンチマーク記事:
+{benchmark_list}
+
+## 出力先
+{BASE_DIR / review_path}
+
+必ず `Overall: X/10` の形式でスコアを含めてください。
+""")
+
+        if not (BASE_DIR / review_path).exists():
+            raise RuntimeError(f"Reviewer failed: {review_path} not found")
+
+        review_text = (BASE_DIR / review_path).read_text(encoding="utf-8")
+        score = extract_score(review_text)
+        if score is None:
+            log(f"WARNING: Could not extract score, defaulting to 5.0")
+            score = 5.0
+
+        # --- スコア記録+停止判定 ---
+        config["last_score"] = score
+        config["scores"].append({"iteration": n, "score": score})
+
+        threshold = config.get("score_threshold", 9.0)
+        if score >= threshold:
+            config["consecutive_above_threshold"] = config.get("consecutive_above_threshold", 0) + 1
+        else:
+            config["consecutive_above_threshold"] = 0
         save_config(config)
-        print(f"ACTION: CALL_CONSOLIDATION  # iteration {n}")
-        print_agent_context(config, {
-            "style_guide_path": "style_guide.md",
-            "consolidation_output_path": f"iterations/{n}/consolidation_report.md",
-            "target_lines": 200,
-            "instruction": "内容を失わずに文字数を圧縮する。ANTIパターン表は10行以内に削減。重複ルールを統合。",
-        })
-    else:
-        config["current_phase"] = "update"
+
+        log(f"Score: {score}/10 (consecutive≥{threshold}: {config['consecutive_above_threshold']})")
+
+        # 2連続 ≥ 9.0
+        if config["consecutive_above_threshold"] >= 2:
+            log("SUCCESS: 2 consecutive scores >= 9.0!")
+            config["status"] = "complete"
+            save_config(config)
+            break
+
+        # 停滞検出
+        if check_stagnation(config["scores"],
+                            config["stagnation_window"],
+                            config["stagnation_tolerance"]):
+            recent = [s["score"] for s in config["scores"][-config["stagnation_window"]:]]
+            log(f"Stagnation detected: {recent}")
+            config["status"] = "complete"
+            save_config(config)
+            break
+
+        # --- Consolidation (iter 5) ---
+        if n == config.get("consolidation_at_iteration"):
+            log("Running Consolidator...")
+            call_agent("consolidator", f"""
+あなたはConsolidator Agentです。
+
+{read_agent_def("consolidator")}
+
+{BASE_DIR / "style_guide.md"} を読んで、内容を維持したまま文字数を圧縮してください。
+目標: 200行以内。上書き保存してください。
+圧縮レポートを {BASE_DIR / f"iterations/{n}/consolidation_report.md"} に出力してください。
+""")
+
+        # --- Style Guide Updater ---
+        log("Updating style guide...")
+        call_agent("style_guide_updater", f"""
+あなたはStyle Guide Updater Agentです。
+
+{read_agent_def("style_guide_updater")}
+
+## 読むもの
+1. {BASE_DIR / f"iterations/{n}/review.md"}
+2. {BASE_DIR / f"iterations/{n}/article.md"}
+3. {BASE_DIR / "style_guide.md"}
+4. {BASE_DIR / "anti_patterns.md"}
+
+レビューで指摘された問題を書き方ルールとしてstyle_guide.mdに追加してください。
+繰り返される失敗をanti_patterns.mdに追記してください。
+change logを {BASE_DIR / f"iterations/{n}/changelog.md"} に出力してください。
+""")
+
+        config["current_phase"] = "next"
         save_config(config)
-        print("ACTION: CALL_STYLE_GUIDE_UPDATER")
-        print_agent_context(config, {
-            "review_path": f"iterations/{n}/review.md",
-            "article_path": f"iterations/{n}/article.md",
-            "changelog_output_path": f"iterations/{n}/changelog.md",
-            "anti_patterns_log_path": config["anti_patterns_log"],
-            "style_guide_path": "style_guide.md",
-        })
+        log(f"Iteration {n} complete. Moving to next.")
 
 
-def cmd_after_update(config: dict):
-    """Style Guide Updater完了後 → 次イテレーションへ"""
-    config["current_phase"] = "next"
-    save_config(config)
-    next_n = config["current_iteration"] + 1
-    print(f"ACTION: NEXT_ITERATION  # run: python orchestrator.py start-iteration")
-    print(f"NEXT_ITERATION: {next_n}")
+# ============================================================
+# Main Commands
+# ============================================================
+
+def cmd_run(source_files: list[str]):
+    """全自動実行: init → Phase 1 → Phase 0 → Phase 2 → Phase 3 → 完成"""
+    config = load_config()
+
+    # init
+    phase_init(config, source_files)
+
+    # Phase 1: Code Analyzer (topicが必要なのでPhase 0より先)
+    config = load_config()
+    phase_analyze_code(config)
+
+    # Phase 0: Trend Searcher
+    config = load_config()
+    phase_search_trends(config)
+
+    # Phase 2a: Dev Simulator
+    config = load_config()
+    phase_simulate(config)
+
+    # Phase 2b: Material Review Loop
+    config = load_config()
+    phase_review_materials(config)
+
+    # Phase 3: Article Loop
+    config = load_config()
+    phase_article_loop(config)
+
+    # 完了
+    config = load_config()
+    log("=" * 60)
+    log(f"COMPLETE! Final article: iterations/{config['current_iteration']}/article.md")
+    log(f"Scores: {[s['score'] for s in config['scores']]}")
+    log(f"Material scores: {[s['score'] for s in config['material_scores']]}")
+    log("=" * 60)
 
 
-def cmd_after_consolidate(config: dict):
-    """Consolidation完了後 → Style Guide Updater呼び出し"""
-    n = config["current_iteration"]
-    config["current_phase"] = "update"
-    save_config(config)
-
-    print("ACTION: CALL_STYLE_GUIDE_UPDATER  # after consolidation")
-    print_agent_context(config, {
-        "review_path": f"iterations/{n}/review.md",
-        "article_path": f"iterations/{n}/article.md",
-        "changelog_output_path": f"iterations/{n}/changelog.md",
-        "anti_patterns_log_path": config["anti_patterns_log"],
-        "style_guide_path": "style_guide.md",
-        "note": "consolidation後なので、新規ルール追加より既存ルールの精緻化を優先する",
-    })
-
-
-def cmd_status(config: dict):
-    """全フェーズの進捗を表示"""
-    print("=== Orchestrator Status ===")
+def cmd_status():
+    config = load_config()
     print(json.dumps(config, indent=2, ensure_ascii=False))
 
 
-# --- Command Router ---
-
-COMMANDS = {
-    "analyze-code": cmd_analyze_code,
-    "after-analyze-code": cmd_after_analyze_code,
-    "search-trends": cmd_search_trends,
-    "after-search-trends": cmd_after_search_trends,
-    "simulate": cmd_simulate,
-    "after-simulate": cmd_after_simulate,
-    "review-materials": cmd_review_materials,
-    "after-material-update": cmd_after_material_update,
-    "start-iteration": cmd_start_iteration,
-    "after-write": cmd_after_write,
-    "after-update": cmd_after_update,
-    "after-consolidate": cmd_after_consolidate,
-    "status": cmd_status,
-}
-
-SCORE_COMMANDS = {"after-review", "after-material-review"}
-ALL_COMMANDS = set(COMMANDS.keys()) | SCORE_COMMANDS | {"init"}
-
-
 def main():
-    cmd = sys.argv[1] if len(sys.argv) > 1 else "status"
-    if cmd not in ALL_COMMANDS:
-        print(f"Unknown command: {cmd}")
-        print(f"Available: {', '.join(sorted(ALL_COMMANDS))}")
-        sys.exit(1)
+    if len(sys.argv) < 2:
+        cmd_status()
+        return
 
-    config = load_config()
+    cmd = sys.argv[1]
 
-    if cmd == "init":
-        if len(sys.argv) < 3:
-            print("ERROR: init requires source file paths")
-            print("  Usage: python orchestrator.py init --source <file1> <file2> ...")
-            sys.exit(1)
+    if cmd == "run":
         files = [a for a in sys.argv[2:] if a != "--source"]
-        cmd_init(config, files)
+        if not files:
+            print("Usage: python orchestrator.py run --source <file1> <file2> ...")
+            sys.exit(1)
+        cmd_run(files)
 
-    elif cmd == "after-review":
-        if len(sys.argv) < 3:
-            print("ERROR: after-review requires a score argument")
-            sys.exit(1)
-        try:
-            score = float(sys.argv[2])
-        except ValueError:
-            print(f"ERROR: Invalid score '{sys.argv[2]}' — must be a number")
-            sys.exit(1)
-        cmd_after_review(config, score)
-
-    elif cmd == "after-material-review":
-        if len(sys.argv) < 3:
-            print("ERROR: after-material-review requires a score argument")
-            sys.exit(1)
-        try:
-            score = float(sys.argv[2])
-        except ValueError:
-            print(f"ERROR: Invalid score '{sys.argv[2]}' — must be a number")
-            sys.exit(1)
-        cmd_after_material_review(config, score)
+    elif cmd == "status":
+        cmd_status()
 
     else:
-        COMMANDS[cmd](config)
+        print(f"Unknown command: {cmd}")
+        print("Available: run, status")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
